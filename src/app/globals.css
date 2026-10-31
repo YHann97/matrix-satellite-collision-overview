@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-space-mono: 'Space Mono', monospace;
+  --bg-main: #061426;
+  --bg-panel: #0B1E35;
+  --primary-blue: #245BFF;
+  --text-primary: #F5F7FA;
+  --text-secondary: #A8B6CB;
+  --border-color: #243B55;
+}
+
+body {
+  background-color: #061426;
+  color: #F5F7FA;
+  font-family: var(--font-space-mono), monospace;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0B1E35;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #243B55;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #245BFF;
+}
