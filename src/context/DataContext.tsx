@@ -392,7 +392,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     grouped.encounters = applyPrecomputed(newDataset, grouped.encounters, precomputedCacheRef.current);
     setDatasets((prev) => [
       newDataset,
-      ...prev.map((d) => ({ ...d, is_active: false })),
+      ...prev.filter((d) => d.id !== newDatasetId).map((d) => ({ ...d, is_active: false })),
     ]);
     encounterSnapshotsRef.current.set(activeDatasetIdRef.current, encounters);
     encounterSnapshotsRef.current.set(newDatasetId, grouped.encounters);
