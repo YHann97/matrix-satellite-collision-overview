@@ -5,6 +5,7 @@ import { EncounterSummary } from '@/types/telemetry';
 import { geoGraticule10, geoOrthographic, geoPath } from 'd3-geo';
 import { debrisRaan, missionColor, missionRaan, orbitPoint } from '@/lib/geo/orbit';
 import { useData, DEFAULT_GLOBE_VIEW } from '@/context/DataContext';
+import { GlobeMenu } from './GlobeMenu';
 
 // Natural Earth 110m land, served from /public/data; fetched once and shared
 let landPromise: Promise<any> | null = null;
@@ -28,6 +29,11 @@ interface GlobeViewProps {
   onSelectEncounter: (encounter: EncounterSummary) => void;
   filterTier?: string;
   maxMarkers?: number;
+  /** Every mission available, for the filter menu */
+  missions: string[];
+  /** Encounters in the selected mission and how they split by tier, for the filter menu */
+  totalCount: number;
+  tierCounts: { critical: number; elevated: number; safe: number };
 }
 
 export function GlobeView({
@@ -36,6 +42,9 @@ export function GlobeView({
   onSelectEncounter,
   filterTier = 'all',
   maxMarkers = 1_000_000,
+  missions,
+  totalCount,
+  tierCounts,
 }: GlobeViewProps) {
   const { globeViewRef, globeFilters, setGlobeFilters } = useData();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -289,6 +298,10 @@ export function GlobeView({
       : null;
   const ringOpacity = missionOrbits.length === 1 ? 0.95 : 0.6;
 
+  // Fit the globe to the available area (orbits reach ~240px from the centre), then apply the user's zoom
+  const fit = canvasSize.w > 0 ? Math.min(2.2, Math.min(canvasSize.w, canvasSize.h) / 500) : 1;
+  const viewScale = zoomLevel * fit;
+
   // Keep the marker canvas the same size as the globe area
   useEffect(() => {
     const el = mapContainerRef.current;
@@ -320,14 +333,14 @@ export function GlobeView({
     const cosT = Math.cos(tilt);
     const sinT = Math.sin(tilt);
     const detailed = renderedEncounters.length <= 300; // small satellite glyphs; plain dots beyond that
-    const dot = 1.6 + zoomLevel * 0.9;
+    const dot = 1.6 + viewScale * 0.9;
     const hits: { enc: EncounterSummary; x: number; y: number }[] = [];
     let selectedPos: { x: number; y: number } | null = null;
 
     const drawMarker = (color: string, x: number, y: number, scale: number) => {
       g.fillStyle = color;
       if (detailed) {
-        const u = scale * zoomLevel;
+        const u = scale * viewScale;
         g.fillRect(x - 2.5 * u, y - 2.5 * u, 5 * u, 5 * u);
         g.fillRect(x - 8 * u, y - 1.5 * u, 5 * u, 3 * u);
         g.fillRect(x + 3 * u, y - 1.5 * u, 5 * u, 3 * u);
@@ -350,8 +363,8 @@ export function GlobeView({
         const radius = EARTH_RADIUS_PX + (enc.altitude_km - 400) * 0.12;
         const x = px * radius;
         const y = -(py * cosT - pz * sinT) * radius;
-        const sx = x * zoomLevel;
-        const sy = y * zoomLevel;
+        const sx = x * viewScale;
+        const sy = y * viewScale;
         const color = TIER_COLORS[enc.operational_tier] ?? TIER_COLORS.incomplete;
 
         if (pass === 0) {
@@ -374,11 +387,11 @@ export function GlobeView({
       g.strokeStyle = '#FFFFFF';
       g.lineWidth = 1.5;
       g.beginPath();
-      g.arc(selectedPos.x, selectedPos.y, 12 * Math.max(1, zoomLevel * 0.8), 0, Math.PI * 2);
+      g.arc(selectedPos.x, selectedPos.y, 12 * Math.max(1, viewScale * 0.8), 0, Math.PI * 2);
       g.stroke();
     }
     hitsRef.current = hits;
-  }, [renderedEncounters, rotationAngle, pitch, zoomLevel, selectedEncounterId, canvasSize]);
+  }, [renderedEncounters, rotationAngle, pitch, viewScale, selectedEncounterId, canvasSize]);
 
   return (
     <div className="relative w-full h-full flex flex-col bg-[#061426] select-none overflow-hidden">
@@ -402,52 +415,24 @@ export function GlobeView({
         )}
       </div>
 
-      {/* Top Right Globe Controls (compact, collapsible) */}
-      <div className="absolute top-2 right-2 z-20 flex items-center gap-1 text-[11px]">
-        {!globeFilters.controlsCollapsed && (
-          <>
-            <button
-              onClick={() => setIsRotating(!isRotating)}
-              className="px-2 py-1 bg-[#0B1E35] border border-[#243B55] rounded hover:border-[#245BFF] text-[#F5F7FA] flex items-center gap-1.5 shadow"
-              title={isRotating ? 'Pause auto-rotate' : 'Start auto-rotate'}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${isRotating ? 'bg-[#10B981]' : 'bg-[#FBBF24]'}`} />
-              <span>{isRotating ? 'Rotate: ON' : 'Rotate: OFF'}</span>
-            </button>
-
-            <button
-              onClick={handleReset}
-              className="px-2 py-1 bg-[#0B1E35] border border-[#243B55] rounded hover:border-[#A8B6CB] text-[#A8B6CB] shadow"
-            >
-              Reset
-            </button>
-
-            <div className="flex rounded border border-[#243B55] overflow-hidden bg-[#0B1E35] shadow">
-              <button
-                onClick={() => handleZoom(0.15)}
-                className="px-2 py-1 text-[#F5F7FA] hover:bg-[#132742] border-r border-[#243B55] font-bold"
-                title="Zoom In"
-              >
-                +
-              </button>
-              <button
-                onClick={() => handleZoom(-0.15)}
-                className="px-2 py-1 text-[#F5F7FA] hover:bg-[#132742] font-bold"
-                title="Zoom Out"
-              >
-                -
-              </button>
-            </div>
-          </>
-        )}
-        <button
-          onClick={() => setGlobeFilters((f) => ({ ...f, controlsCollapsed: !f.controlsCollapsed }))}
-          className="px-2 py-1 bg-[#0B1E35] border border-[#243B55] rounded hover:border-[#A8B6CB] text-[#A8B6CB] shadow"
-          title={globeFilters.controlsCollapsed ? 'Show globe controls' : 'Hide globe controls'}
-        >
-          {globeFilters.controlsCollapsed ? 'Controls ▾' : '▴'}
-        </button>
-      </div>
+      {/* One dropdown (top right) for filters and view controls */}
+      <GlobeMenu
+        missions={missions}
+        mission={globeFilters.mission}
+        tier={globeFilters.tier}
+        maxMarkers={globeFilters.maxMarkers}
+        totalCount={totalCount}
+        tierCounts={tierCounts}
+        onMission={(mission) => setGlobeFilters((f) => ({ ...f, mission, focusEventId: null }))}
+        onTier={(tier) => setGlobeFilters((f) => ({ ...f, tier }))}
+        onMaxMarkers={(n) =>
+          setGlobeFilters((f) => ({ ...f, maxMarkers: Math.max(1, Math.min(1_000_000, Math.round(n) || 1)) }))
+        }
+        rotating={isRotating}
+        onToggleRotate={() => setIsRotating((r) => !r)}
+        onZoom={handleZoom}
+        onReset={handleReset}
+      />
 
       {/* Interactive 3D Vector Globe Area */}
       <div
@@ -461,7 +446,7 @@ export function GlobeView({
       >
         <div
           className="relative flex items-center justify-center"
-          style={{ transform: `scale(${zoomLevel})` }}
+          style={{ transform: `scale(${viewScale})` }}
         >
           {/* Far side of each mission orbit (hidden behind Earth where they overlap) */}
           <svg className="absolute w-[700px] h-[700px] pointer-events-none overflow-visible" viewBox="-350 -350 700 700">
@@ -530,38 +515,12 @@ export function GlobeView({
         )}
       </div>
 
-      {/* Mission legend: click a mission to show only its orbit */}
-      {missionOrbits.length > 1 && (
-        <div className="absolute bottom-12 left-2 z-20 max-w-[min(520px,60%)] flex flex-wrap gap-1 text-[10px]">
-          {[...missionOrbits]
-            .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-            .map((o) => (
-              <button
-                key={o.id}
-                onClick={() => setGlobeFilters((f) => ({ ...f, mission: o.id, focusEventId: null }))}
-                className="px-1.5 py-0.5 rounded bg-[#0B1E35]/90 border border-[#243B55] hover:border-[#A8B6CB] text-[#F5F7FA] flex items-center gap-1"
-                title={`Show only ${/^\d+$/.test(o.id) ? `Mission ${o.id}` : o.id}`}
-              >
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: missionColor(o.id) }} />
-                {/^\d+$/.test(o.id) ? `M${o.id}` : o.id}
-              </button>
-            ))}
-        </div>
-      )}
-
-      {/* Attribution & Status Footer */}
-      <div className="p-3 bg-[#0B1E35]/90 border-t border-[#243B55] flex items-center justify-between text-[11px] text-[#A8B6CB] z-20">
-        <div>
-          <span>Showing </span>
-          <strong className="text-[#F5F7FA]">{visibleEncounters.length}</strong>
-          <span> of </span>
-          <strong className="text-[#F5F7FA]">{encounters.length}</strong>
-          <span> active encounters</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span>Mapbox GL JS Dark Vector Projection</span>
-          <span>&copy; Mapbox &bull; &copy; OpenStreetMap</span>
-        </div>
+      <div className="px-3 py-1.5 bg-[#0B1E35]/90 border-t border-[#243B55] flex items-center justify-between text-[11px] text-[#A8B6CB] z-20">
+        <span>
+          Showing <strong className="text-[#F5F7FA]">{visibleEncounters.length.toLocaleString()}</strong> of{' '}
+          <strong className="text-[#F5F7FA]">{totalCount.toLocaleString()}</strong> encounters
+        </span>
+        <span className="hidden md:inline">Map: Natural Earth</span>
       </div>
     </div>
   );

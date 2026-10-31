@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { formatRiskScore, riskPowerLabel } from '@/lib/classification/policy';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EncounterSummary, TelemetryRow } from '@/types/telemetry';
@@ -19,6 +21,11 @@ const TIER_COLOR: Record<string, number> = {
 };
 
 const TARGET_PASS_SECONDS = 2;
+
+// Last position the card was dragged to (kept while the page is open, so re-opening it stays put)
+let lastCardPos: { x: number; y: number } | null = null;
+
+const formatDistance = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m.toFixed(0)} m`);
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -44,6 +51,11 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
   const mountRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const clockRef = useRef<HTMLSpanElement>(null);
+  const liveLabelRef = useRef<HTMLDivElement>(null);
+  const missLabelRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(lastCardPos);
   const progressRef = useRef(0);
   const playingRef = useRef(true);
   const rateRef = useRef(1);
@@ -175,7 +187,27 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
     path.computeLineDistances();
     scene.add(path);
     const missGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), closestScene]);
-    scene.add(new THREE.Line(missGeo, new THREE.LineBasicMaterial({ color: 0xfbbf24 })));
+    scene.add(new THREE.Line(missGeo, new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.5 })));
+
+    // Live separation: a line from the satellite to the debris that tightens and reddens as they close in
+    const sepPositions = new Float32Array(6);
+    const sepGeo = new THREE.BufferGeometry();
+    sepGeo.setAttribute('position', new THREE.BufferAttribute(sepPositions, 3));
+    const sepMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+    scene.add(new THREE.Line(sepGeo, sepMat));
+    const maxSep = Math.max(start.length(), end.length(), 0.001);
+    const farColor = new THREE.Color(0x9fb4d0);
+    const nearColor = new THREE.Color(0xef4444);
+    const tmp = new THREE.Vector3();
+    const placeLabel = (el: HTMLElement | null, world: THREE.Vector3, dy = 0) => {
+      if (!el) return;
+      tmp.copy(world).project(camera);
+      const x = (tmp.x * 0.5 + 0.5) * mount.clientWidth;
+      const y = (-tmp.y * 0.5 + 0.5) * mount.clientHeight + dy;
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
+      el.style.opacity = tmp.z < 1 ? '1' : '0';
+    };
+    if (missLabelRef.current) missLabelRef.current.textContent = `closest ${formatDistance(miss)}`;
     const ringGeo = new THREE.RingGeometry(0.16, 0.2, 32);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
     const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -206,6 +238,14 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
       }
       const u = Math.min(1, progressRef.current);
       debris.position.lerpVectors(start, end, u);
+
+      // Update the satellite-to-debris line, its colour and its distance label
+      sepPositions[3] = debris.position.x;
+      sepPositions[4] = debris.position.y;
+      sepPositions[5] = debris.position.z;
+      sepGeo.attributes.position.needsUpdate = true;
+      const sep = debris.position.length();
+      sepMat.color.copy(farColor).lerp(nearColor, 1 - Math.min(1, sep / maxSep));
       debris.rotation.x += dt * 2.2;
       debris.rotation.y += dt * 1.4;
       satellite.rotation.y += dt * 0.25;
@@ -222,6 +262,12 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
       }
 
       controls.update();
+      camera.updateMatrixWorld();
+      if (liveLabelRef.current) {
+        liveLabelRef.current.textContent = formatDistance(sep / s);
+        placeLabel(liveLabelRef.current, tmp.copy(debris.position).multiplyScalar(0.5));
+      }
+      placeLabel(missLabelRef.current, closestScene, -14);
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };
@@ -231,7 +277,7 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
       cancelAnimationFrame(raf);
       observer.disconnect();
       controls.dispose();
-      [starGeo, debrisGeo, pathGeo, missGeo, ringGeo].forEach((g) => g.dispose());
+      [starGeo, debrisGeo, pathGeo, missGeo, ringGeo, sepGeo].forEach((g) => g.dispose());
       scene.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
@@ -245,20 +291,54 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
     // Rebuild the scene when the encounter or its loaded vectors change
   }, [encounter.event_id, latest, minimized]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tierText =
+  const tierBadge =
     encounter.operational_tier === 'critical'
-      ? 'text-[#EF4444]'
+      ? 'bg-[#EF4444] text-white'
       : encounter.operational_tier === 'elevated'
-      ? 'text-[#FBBF24]'
-      : 'text-[#10B981]';
+      ? 'bg-[#FBBF24] text-black'
+      : 'bg-[#10B981] text-black';
+  const leadTime =
+    encounter.min_time_to_tca < 1
+      ? `${(encounter.min_time_to_tca * 24).toFixed(1)} h`
+      : `${encounter.min_time_to_tca.toFixed(1)} d`;
 
   return (
-    <div className="absolute top-12 left-2 z-30 w-[340px] max-w-[90vw] bg-[#0B1E35] border border-[#243B55] rounded-xl shadow-2xl text-xs overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#243B55]">
+    <div
+      ref={cardRef}
+      className="absolute z-30 w-[340px] max-w-[90vw] bg-[#0B1E35] border border-[#243B55] rounded-xl shadow-2xl text-xs overflow-hidden"
+      style={{ left: pos?.x ?? 8, top: pos?.y ?? 48 }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-2 border-b border-[#243B55] cursor-move select-none touch-none"
+        title="Drag to move"
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          const card = cardRef.current;
+          if (!card) return;
+          dragRef.current = { dx: e.clientX - card.offsetLeft, dy: e.clientY - card.offsetTop };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const card = cardRef.current;
+          const parent = card?.offsetParent as HTMLElement | null;
+          if (!dragRef.current || !card || !parent) return;
+          // Keep the card inside the globe area
+          const x = Math.max(0, Math.min(parent.clientWidth - card.offsetWidth, e.clientX - dragRef.current.dx));
+          const y = Math.max(0, Math.min(parent.clientHeight - card.offsetHeight, e.clientY - dragRef.current.dy));
+          setPos({ x, y });
+        }}
+        onPointerUp={(e) => {
+          dragRef.current = null;
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+          lastCardPos = pos;
+        }}
+      >
         <div className="min-w-0">
-          <span className="text-[#A8B6CB] text-[10px] block">CLOSE-APPROACH SIMULATION</span>
-          <span className="font-bold text-[#F5F7FA] truncate block">
-            {encounter.event_id} <span className={tierText}>{encounter.operational_tier.toUpperCase()}</span>
+          <span className="font-bold text-[#F5F7FA] flex items-center gap-2">
+            <span className="truncate">{encounter.event_id}</span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${tierBadge}`}>
+              {encounter.operational_tier.toUpperCase()}
+            </span>
           </span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
@@ -284,6 +364,16 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
           <div className="relative">
             <div ref={mountRef} className="w-full h-[220px] cursor-grab active:cursor-grabbing" />
             <span ref={clockRef} className="absolute top-2 left-2 font-mono text-[11px] text-[#F5F7FA] pointer-events-none" />
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div
+                ref={liveLabelRef}
+                className="absolute left-0 top-0 px-1.5 py-0.5 rounded bg-[#061426]/85 border border-[#EF4444]/60 text-[10px] font-bold font-mono text-[#F5F7FA] whitespace-nowrap"
+              />
+              <div
+                ref={missLabelRef}
+                className="absolute left-0 top-0 px-1 text-[9px] font-mono text-[#FBBF24] whitespace-nowrap"
+              />
+            </div>
             <div className="absolute bottom-2 left-2 text-[10px] text-[#A8B6CB] pointer-events-none">
               <span className="text-[#60a5fa]">R</span> radial &middot; <span className="text-[#f472b6]">T</span> along-track &middot;{' '}
               <span className="text-[#34d399]">N</span> cross-track
@@ -343,30 +433,36 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
             </select>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 px-3 pb-2 text-[11px]">
+          <div className="grid grid-cols-4 gap-2 px-3 py-2 text-[11px]">
             <div>
-              <span className="text-[#A8B6CB] block text-[10px]">MISS DISTANCE</span>
-              <span className="text-[#F5F7FA] font-bold">
-                {encounter.miss_distance >= 1000
-                  ? `${(encounter.miss_distance / 1000).toFixed(2)} km`
-                  : `${encounter.miss_distance.toFixed(0)} m`}
+              <span className="text-[#A8B6CB] block text-[10px]">RISK</span>
+              <span className="text-[#F5F7FA] font-bold" title={riskPowerLabel(pc)}>
+                {formatRiskScore(pc, 1)}
               </span>
             </div>
             <div>
-              <span className="text-[#A8B6CB] block text-[10px]">REL. SPEED</span>
-              <span className="text-[#F5F7FA] font-bold">{(geom.speed / 1000).toFixed(2)} km/s</span>
+              <span className="text-[#A8B6CB] block text-[10px]">MISS</span>
+              <span className="text-[#F5F7FA] font-bold">{formatDistance(encounter.miss_distance)}</span>
             </div>
             <div>
-              <span className="text-[#A8B6CB] block text-[10px]">Pc</span>
-              <span className="text-[#F5F7FA] font-bold">{pc !== null && pc !== undefined ? pc.toExponential(1) : 'N/A'}</span>
+              <span className="text-[#A8B6CB] block text-[10px]">TCA IN</span>
+              <span className="text-[#F5F7FA] font-bold">{leadTime}</span>
+            </div>
+            <div>
+              <span className="text-[#A8B6CB] block text-[10px]">OBJECT</span>
+              <span className="text-[#F5F7FA] font-bold truncate block">{encounter.c_object_type}</span>
             </div>
           </div>
 
-          <p className="px-3 pb-3 text-[10px] leading-relaxed text-[#A8B6CB]">
-            Built from this encounter&apos;s real relative position and velocity at closest approach. Objects are drawn far
-            larger than life and the path is scaled to the miss distance. At these distances the objects miss each other; a
-            collision is what the Pc estimates, not what is shown.
-          </p>
+          <div className="flex items-center gap-3 px-3 pb-3">
+            <p className="flex-1 text-[10px] text-[#A8B6CB]">Not to scale. Risk score = 10^risk.</p>
+            <Link
+              href={`/encounters?eventId=${encounter.event_id}`}
+              className="px-3 py-1.5 bg-[#245BFF] hover:bg-blue-600 text-white rounded font-bold transition-colors shadow"
+            >
+              Investigate &rarr;
+            </Link>
+          </div>
         </>
       )}
     </div>

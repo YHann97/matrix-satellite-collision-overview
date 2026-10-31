@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useData } from '@/context/DataContext';
+import { formatRiskScore } from '@/lib/classification/policy';
 
 export default function InsightsPage() {
   const router = useRouter();
@@ -79,6 +80,18 @@ export default function InsightsPage() {
   const rocketPct = totalEncounters > 0 ? ((rocketCount / totalEncounters) * 100).toFixed(1) : '0';
   const unknownPct = totalEncounters > 0 ? ((unknownCount / totalEncounters) * 100).toFixed(1) : '0';
 
+  // Risk score (10^risk) distribution, split at the policy thresholds (1e-4 critical, 1e-6 elevated)
+  const scores = encounters.map((e) => e.predicted_pc ?? e.source_pc);
+  const riskBins = [
+    { label: '\u2265 1e-4 (critical threshold)', color: '#EF4444', count: scores.filter((x) => x !== null && x >= 1e-4).length },
+    { label: '1e-5 to 1e-4', color: '#F97316', count: scores.filter((x) => x !== null && x >= 1e-5 && x < 1e-4).length },
+    { label: '1e-6 to 1e-5 (elevated threshold)', color: '#FBBF24', count: scores.filter((x) => x !== null && x >= 1e-6 && x < 1e-5).length },
+    { label: '1e-7 to 1e-6', color: '#34D399', count: scores.filter((x) => x !== null && x >= 1e-7 && x < 1e-6).length },
+    { label: '< 1e-7', color: '#10B981', count: scores.filter((x) => x !== null && x < 1e-7).length },
+  ];
+  const maxRiskScore = scores.reduce<number | null>((m, x) => (x !== null && (m === null || x > m) ? x : m), null);
+  const riskBinTotal = Math.max(1, riskBins.reduce((s, b) => s + b.count, 0));
+
   const handleBinClick = (filterKey: string) => {
     router.push(`/encounters?leadTime=${filterKey}`);
   };
@@ -115,7 +128,7 @@ export default function InsightsPage() {
       </div>
 
       {/* KPI Top Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         <div className="p-3 bg-[#0B1E35] border border-[#243B55] rounded-lg">
           <span className="text-[10px] text-[#A8B6CB] block">TELEMETRY ROWS</span>
           <span className="text-base font-bold text-[#F5F7FA]">
@@ -145,6 +158,10 @@ export default function InsightsPage() {
           <span className="text-base font-bold text-[#10B981]">
             {safeEncounters.toLocaleString()}
           </span>
+        </div>
+        <div className="p-3 bg-[#0B1E35] border border-[#243B55] rounded-lg">
+          <span className="text-[10px] text-[#A8B6CB] block">HIGHEST RISK SCORE</span>
+          <span className="text-base font-bold text-[#F5F7FA]">{formatRiskScore(maxRiskScore)}</span>
         </div>
         <div className="p-3 bg-[#0B1E35] border border-[#243B55] rounded-lg">
           <span className="text-[10px] text-[#94A3B8] block">PENDING/INCOMPLETE</span>
@@ -280,6 +297,29 @@ export default function InsightsPage() {
         </div>
 
       </div>
+      {/* Risk score distribution */}
+      <div className="bg-[#0B1E35] border border-[#243B55] rounded-lg p-5 space-y-3">
+        <div>
+          <h2 className="text-xs font-bold text-[#F5F7FA]">RISK SCORE DISTRIBUTION</h2>
+          <p className="text-[11px] text-[#A8B6CB]">Risk score = 10^risk, the collision probability of each encounter&apos;s latest assessment</p>
+        </div>
+        <div className="space-y-2.5">
+          {riskBins.map((b) => (
+            <div key={b.label}>
+              <div className="flex justify-between mb-1">
+                <span className="text-[#A8B6CB]">{b.label}</span>
+                <span className="text-[#F5F7FA] font-bold">
+                  {b.count.toLocaleString()} ({((b.count / riskBinTotal) * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="w-full bg-[#061426] h-2 rounded overflow-hidden">
+                <div className="h-full" style={{ width: `${(b.count / riskBinTotal) * 100}%`, backgroundColor: b.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Per-mission breakdown */}
       <div className="bg-[#0B1E35] border border-[#243B55] rounded-lg p-5 space-y-3">
         <div>

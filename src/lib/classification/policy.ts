@@ -131,3 +131,16 @@ export function normalizeLogRiskToPc(log10Pc: number | null | undefined): number
   if (!Number.isFinite(pc) || pc < 0) return null;
   return Math.min(pc, 1.0);
 }
+
+/**
+ * Risk score: the linear collision probability, 10^risk where `risk` is the dataset's log10 value.
+ * Displayed in scientific notation, e.g. 1.20e-4.
+ */
+export function formatRiskScore(score: number | null | undefined, digits = 2): string {
+  return typeof score === 'number' && Number.isFinite(score) ? score.toExponential(digits) : 'N/A';
+}
+
+/** The power form of a risk score: score = 10^risk, e.g. "10^-3.92". */
+export function riskPowerLabel(score: number | null | undefined): string {
+  return typeof score === 'number' && Number.isFinite(score) && score > 0 ? `10^${Math.log10(score).toFixed(2)}` : '';
+}

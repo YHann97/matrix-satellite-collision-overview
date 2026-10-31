@@ -35,7 +35,7 @@ export function AboutDataModal({ isOpen, onClose }: AboutDataModalProps) {
               <li><strong className="text-[#A8B6CB]">time_to_tca:</strong> Days to Closest Approach</li>
               <li><strong className="text-[#A8B6CB]">miss_distance:</strong> Metres (converted to km for display)</li>
               <li><strong className="text-[#A8B6CB]">relative_speed:</strong> Metres per second (m/s)</li>
-              <li><strong className="text-[#A8B6CB]">risk:</strong> log10(Pc) at the given message assessment</li>
+              <li><strong className="text-[#A8B6CB]">risk:</strong> log10(Pc) at the given message assessment; the app's risk score is 10^risk</li>
             </ul>
           </div>
 

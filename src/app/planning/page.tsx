@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData } from '@/context/DataContext';
+import { formatRiskScore } from '@/lib/classification/policy';
 import { PlanRecord } from '@/lib/data/mockStore';
 
 export default function PlanningPage() {
@@ -228,10 +229,8 @@ export default function PlanningPage() {
                     </span>
                     <div className="grid grid-cols-4 gap-2 text-[11px] text-[#A8B6CB] pt-1">
                       <div>
-                        Pc:{' '}
-                        <strong className="text-[#F5F7FA]">
-                          {selectedPlan.baseline_pc ? selectedPlan.baseline_pc.toExponential(2) : '2.40e-4'}
-                        </strong>
+                        Risk score:{' '}
+                        <strong className="text-[#F5F7FA]">{formatRiskScore(selectedPlan.baseline_pc)}</strong>
                       </div>
                       <div>
                         Miss:{' '}

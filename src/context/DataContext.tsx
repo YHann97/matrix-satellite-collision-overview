@@ -340,7 +340,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           event_id: eventId,
           action_type: 'PREDICTION REFRESHED',
           operator_email: 'system_model',
-          summary: `Model returned Pc: ${data.probability_constant.toExponential(2)}, tier: ${data.classification}`,
+          summary: `Model returned risk score: ${data.probability_constant.toExponential(2)}, tier: ${data.classification}`,
         });
       }
       return data;

@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/context/DataContext';
+import { formatRiskScore, riskPowerLabel } from '@/lib/classification/policy';
 import { OperationalTier, ReviewStatus } from '@/types/telemetry';
 
 function EncountersContent() {
@@ -222,7 +223,7 @@ function EncountersContent() {
                   <th className="p-3 font-bold">EVENT ID</th>
                   <th className="p-3 font-bold">OBJECT</th>
                   <th className="p-3 font-bold">RISK TIER</th>
-                  <th className="p-3 font-bold">COLLISION Pc</th>
+                  <th className="p-3 font-bold" title="10^risk">RISK SCORE</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
                   <th className="p-3 font-bold">STATUS</th>
@@ -269,8 +270,8 @@ function EncountersContent() {
                           {enc.operational_tier.toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-3 font-bold text-[#F5F7FA]">
-                        {displayPc !== null ? displayPc.toExponential(2) : 'N/A'}
+                      <td className="p-3 font-bold text-[#F5F7FA]" title={riskPowerLabel(displayPc)}>
+                        {formatRiskScore(displayPc)}
                         {enc.predicted_pc !== null && (
                           <span className="text-[10px] text-[#245BFF] ml-1">AI</span>
                         )}
@@ -457,8 +458,8 @@ function EncountersContent() {
                         <span className="text-[#F5F7FA] font-bold">Current Assessment</span>
                       </div>
                       <div>
-                        <span className="text-[#A8B6CB] block">Probability Normalization:</span>
-                        <span className="text-[#F5F7FA] font-mono">Pc = 10^(log10Pc)</span>
+                        <span className="text-[#A8B6CB] block">Risk Score:</span>
+                        <span className="text-[#F5F7FA] font-mono">10^risk</span>
                       </div>
                     </div>
                   </div>
@@ -478,7 +479,7 @@ function EncountersContent() {
                         </div>
                       ))}
                       <p className="text-[#A8B6CB] pt-1">
-                        Policy Rule: Critical if Pc &ge; 1e-4 OR miss_distance &lt; 1,000m. Evaluated unrounded.
+                        Policy Rule: Critical if risk score &ge; 1e-4 OR miss_distance &lt; 1,000m. Evaluated unrounded.
                       </p>
                     </div>
                   </div>
@@ -486,13 +487,12 @@ function EncountersContent() {
                   {/* Metrics */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
-                      <span className="text-[#A8B6CB] text-[11px]">Collision Prob (Pc)</span>
+                      <span className="text-[#A8B6CB] text-[11px]">Risk Score (10^risk)</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
-                        {selectedEncounter.predicted_pc !== null
-                          ? selectedEncounter.predicted_pc.toExponential(2)
-                          : selectedEncounter.source_pc !== null
-                          ? selectedEncounter.source_pc.toExponential(2)
-                          : 'N/A'}
+                        {formatRiskScore(selectedEncounter.predicted_pc ?? selectedEncounter.source_pc)}
+                      </div>
+                      <div className="text-[10px] text-[#A8B6CB] font-mono">
+                        {riskPowerLabel(selectedEncounter.predicted_pc ?? selectedEncounter.source_pc)}
                       </div>
                     </div>
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
@@ -687,13 +687,11 @@ function EncountersContent() {
 
                           <div className="grid grid-cols-2 gap-2 mt-2 text-[#A8B6CB] text-[11px]">
                             <div>
-                              Source log10(Pc):{' '}
-                              <strong className="text-[#F5F7FA] font-mono">
-                                {msg.risk?.toFixed(3) || 'N/A'}
-                              </strong>
-                              {msgPc && (
+                              Risk score:{' '}
+                              <strong className="text-[#F5F7FA] font-mono">{formatRiskScore(msgPc)}</strong>
+                              {msg.risk !== null && msg.risk !== undefined && (
                                 <span className="block text-[10px] text-[#A8B6CB]">
-                                  (Pc = {msgPc.toExponential(2)})
+                                  (10^{Number(msg.risk).toFixed(2)})
                                 </span>
                               )}
                             </div>
