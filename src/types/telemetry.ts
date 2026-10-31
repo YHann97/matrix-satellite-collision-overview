@@ -1,3 +1,4 @@
+import type { TierProbabilities, PcStatus } from './prediction';
 export type OperationalTier = 'critical' | 'elevated' | 'safe' | 'incomplete';
 
 export type ReviewStatus = 'unreviewed' | 'acknowledged' | 'in_planning' | 'reviewed';
@@ -60,7 +61,20 @@ export interface EncounterSummary {
   relative_speed: number | null;
   c_object_type: string;
   source_pc: number | null;
-  predicted_pc: number | null;
+  predicted_pc: number | null; // Legacy storage only. No learned Pc is produced.
+  source_risk_log10_pc?: number | null;
+  source_pc_status?: PcStatus;
+  model_tier_probabilities?: TierProbabilities | null;
+  model_version?: string | null;
+  model_simulation?: boolean;
+  model_prediction_source?: 'live' | 'precomputed' | 'simulation';
+  model_observed_pc?: number | null;
+  model_observed_pc_status?: PcStatus;
+  model_observed_miss_distance_m?: number | null;
+  prediction_as_of_days?: number | null;
+  prediction_completed_at?: string | null;
+  prediction_status?: 'processing' | 'completed' | 'failed';
+  prediction_error?: string | null;
   operational_tier: OperationalTier;
   model_tier?: OperationalTier | null;
   classification_reasons: string[];

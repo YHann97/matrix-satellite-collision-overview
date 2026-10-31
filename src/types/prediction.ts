@@ -1,42 +1,37 @@
-import { OperationalTier } from './telemetry';
-
+export type ForecastTier = 'Safe' | 'Elevated' | 'Critical';
+export type TierProbabilities = Record<ForecastTier, number>;
+export type PcStatus = 'provided' | 'approximately_zero' | 'unavailable';
+export interface PredictionMessage {
+  event_id: string;
+  source_row: number;
+  time_to_tca: number;
+  [key: string]: string | number | null;
+}
 export interface PredictionRequest {
   request_id: string;
   dataset_id: string;
   event_id: string;
   record_id: string;
-  schema_version: string;
-  attributes: Record<string, string | number | null>;
+  schema_version: '2.0';
+  messages: PredictionMessage[];
 }
-
 export interface PredictionResponse {
   request_id: string;
-  event_id: string;
-  record_id: string;
-  probability_constant?: number; // External field
-  pc?: number; // Normalized internal field
-  classification: OperationalTier;
-  reason_codes: string[];
-  prediction_target: 'current_assessment' | 'final_risk_tca';
-  model_version: string;
-  error?: string;
-}
-
-export interface PredictionRecord {
-  id: string;
   dataset_id: string;
   event_id: string;
+  event_key: string;
   record_id: string;
-  request_payload: PredictionRequest;
-  response_payload: PredictionResponse | null;
-  pc: number | null;
-  model_classification: OperationalTier | null;
-  operational_classification: OperationalTier | null;
-  discrepancy_flag: boolean;
-  status: 'not_requested' | 'queued' | 'processing' | 'completed' | 'failed';
-  prediction_target: string;
+  schema_version: '2.0';
+  classification: 'safe' | 'elevated' | 'critical';
+  tier_probabilities: TierProbabilities;
+  prediction_target: 'final_recorded_event_tier';
   model_version: string;
-  error_message?: string | null;
-  created_at: string;
-  completed_at?: string | null;
+  input_time_to_tca_days: number;
+  provided_pc: number | null;
+  provided_pc_status: PcStatus;
+  provided_log10_pc: number | null;
+  provided_miss_distance_m: number | null;
+  final_pc: null;
+  simulation: boolean;
+  source: 'live' | 'precomputed' | 'simulation';
 }

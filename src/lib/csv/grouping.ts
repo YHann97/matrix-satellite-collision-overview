@@ -59,6 +59,8 @@ export function groupEncounters(
       relative_speed: latest.relative_speed ?? null,
       c_object_type: latest.c_object_type || 'UNKNOWN',
       source_pc: sourcePc,
+      source_risk_log10_pc: latest.risk ?? null,
+      source_pc_status: sourcePc === null ? 'unavailable' : (latest.risk != null && latest.risk <= -30 ? 'approximately_zero' : 'provided'),
       predicted_pc: null,
       operational_tier: classification.tier,
       model_tier: null,

@@ -138,12 +138,12 @@ export default function PlanningPage() {
                     <div>
                       Miss:{' '}
                       <strong className="text-[#F5F7FA]">
-                        {plan.baseline_miss_distance ? `${plan.baseline_miss_distance} m` : '842 m'}
+                        {plan.baseline_miss_distance != null ? `${plan.baseline_miss_distance} m` : 'N/A'}
                       </strong>
                       {' • '}
                       Lead:{' '}
                       <strong className="text-[#F5F7FA]">
-                        {plan.baseline_lead_time ? `${plan.baseline_lead_time} d` : '0.45 d'}
+                        {plan.baseline_lead_time != null ? `${plan.baseline_lead_time} d` : 'N/A'}
                       </strong>
                     </div>
                     <div>
@@ -235,13 +235,13 @@ export default function PlanningPage() {
                       <div>
                         Miss:{' '}
                         <strong className="text-[#EF4444]">
-                          {selectedPlan.baseline_miss_distance || '842'} m
+                          {selectedPlan.baseline_miss_distance ?? 'N/A'} m
                         </strong>
                       </div>
                       <div>
                         Lead:{' '}
                         <strong className="text-[#F5F7FA]">
-                          {selectedPlan.baseline_lead_time || '0.45'} d
+                          {selectedPlan.baseline_lead_time ?? 'N/A'} d
                         </strong>
                       </div>
                       <div>
@@ -365,7 +365,7 @@ export default function PlanningPage() {
                         Encounter {selectedPlan.event_id} queued for manual planning evaluation.
                       </p>
                       <span className="text-[10px] text-[#A8B6CB]">
-                        Baseline lead time: {selectedPlan.baseline_lead_time || '0.45'} d
+                        Baseline lead time: {selectedPlan.baseline_lead_time ?? 'N/A'} d
                       </span>
                     </div>
                   </div>

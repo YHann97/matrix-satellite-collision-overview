@@ -127,6 +127,8 @@ export function normalizeLogRiskToPc(log10Pc: number | null | undefined): number
   if (log10Pc === null || log10Pc === undefined || !Number.isFinite(log10Pc)) {
     return null;
   }
+  if (log10Pc > 0) return null;
+  if (log10Pc <= -30) return 0; // Dataset censoring floor, displayed as approximately zero.
   const pc = Math.pow(10, log10Pc);
   if (!Number.isFinite(pc) || pc < 0) return null;
   return Math.min(pc, 1.0);

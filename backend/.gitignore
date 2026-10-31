@@ -1,0 +1,10 @@
+model_bundle/
+hf_staging/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+.env
+.env.*
+!.env.example

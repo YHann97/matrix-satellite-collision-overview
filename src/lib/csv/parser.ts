@@ -109,7 +109,9 @@ export function parseTelemetryCsv(csvContent: string): ParseResult {
       AP,
       c_object_type,
       mission_id,
-      _source_row_number: rowNum,
+      _source_row_number: headers.includes('source_row') && Number.isSafeInteger(attributes.source_row) ? attributes.source_row + 1 : rowNum,
+      source_row: headers.includes('source_row') ? attributes.source_row : idx,
+      _prediction_history_complete: !headers.includes('source_row') || (Number.isSafeInteger(attributes.source_row) && attributes.source_row >= 0),
     });
   });
 

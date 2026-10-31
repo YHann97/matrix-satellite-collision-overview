@@ -69,9 +69,9 @@ export function generateSeedEncounters(count: number = 2167): EncounterSummary[]
       relative_speed: 12000 + ((i * 73) % 4000),
       c_object_type,
       source_pc: pc,
-      predicted_pc: i <= 20 ? pc * 1.05 : null,
+      predicted_pc: null,
       operational_tier: tier,
-      model_tier: i <= 20 ? tier : null,
+      model_tier: null,
       classification_reasons: tier === 'critical' ? ['MISS_DISTANCE_LT_1000M', 'PC_GTE_1E4'] : (tier === 'elevated' ? ['MISS_DISTANCE_1000_TO_5000M'] : ['PC_LT_1E6_AND_MISS_GT_5000M']),
       review_status: i === 1 ? 'acknowledged' : (i === 2 ? 'in_planning' : 'unreviewed'),
       mission_id: `MISSION-${(i % 18) + 1}`,
@@ -116,6 +116,9 @@ export function generateSeedMessages(eventId: string): TelemetryRow[] {
       AP: 14,
       mission_id: 'MISSION-1',
       _source_row_number: baseSeed * 10 + idx + 1,
+      source_row: baseSeed * 10 + idx,
+      _prediction_history_complete: true,
+      _synthetic_demo: true,
       // Additional sample attributes
       c_rcs_estimate: 0.0842,
       t_span: 3.50,
@@ -132,7 +135,7 @@ export function generateSeedMessages(eventId: string): TelemetryRow[] {
 export const INITIAL_DATASETS: Dataset[] = [
   {
     id: 'ds-seed',
-    filename: 'test.csv',
+    filename: 'synthetic-demo.csv',
     sha256_checksum: '8a3f7b2c9e1d0f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
     file_size_bytes: 14285900,
     row_count: 24484,
