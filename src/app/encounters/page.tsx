@@ -235,7 +235,7 @@ function EncountersContent() {
                   <th className="p-3 font-bold">OBJECT</th>
                   <th className="p-3 font-bold">{tiersArePredicted ? 'PREDICTED TIER' : 'RISK TIER'}</th>
                   {!tiersArePredicted && <th className="p-3 font-bold" title="Final-tier forecast when available">MODEL</th>}
-                  <th className="p-3 font-bold" title="Risk score (log10)">RISK</th>
+                  <th className="p-3 font-bold" title="Collision probability from the latest observed message">OBSERVED Pc</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
                   <th className="p-3 font-bold">STATUS</th>
@@ -295,7 +295,7 @@ function EncountersContent() {
                         </td>
                       )}
                       <td className="p-3 font-bold text-[#F5F7FA]" title={`Pc = ${formatRiskScore(displayPc)}`}>
-                        {isPlaceholderScore(displayPc) ? '≈ 0' : displayPc !== null && displayPc > 0 ? Math.log10(displayPc).toFixed(2) : 'N/A'}
+                        {formatRiskScore(displayPc)}
                         {enc.predicted_pc !== null && (
                           <span className="text-[10px] text-[#245BFF] ml-1">AI</span>
                         )}
@@ -540,10 +540,18 @@ function EncountersContent() {
                   {/* Metrics */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
-                      <span className="text-[#A8B6CB] text-[11px]">Risk Score</span>
+                      <span className="text-[#A8B6CB] text-[11px]">Latest observed collision probability (Pc)</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
                         {formatRiskScore(selectedEncounter.source_pc)}
                       </div>
+                      <div className="text-[#A8B6CB] text-[10px] mt-1">
+                        {selectedEncounter.source_pc === 0
+                          ? 'Dataset risk floor (−30): probability too small to compute'
+                          : selectedEncounter.source_pc != null && selectedEncounter.source_pc > 0
+                          ? `Source risk (log₁₀ Pc): ${Math.log10(selectedEncounter.source_pc).toFixed(2)}`
+                          : 'No observed probability available'}
+                      </div>
+                      <div className="text-[#A8B6CB] text-[10px] mt-1">From the latest message; not the predicted final tier.</div>
                     </div>
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
                       <span className="text-[#A8B6CB] text-[11px]">Miss Distance</span>
