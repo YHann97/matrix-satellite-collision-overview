@@ -103,6 +103,8 @@ The system ingests and groups conjunction telemetry records (such as ESA / Kelvi
 
 The test dataset opens with 2,167 precomputed predictions from the frozen LightGBM classifier in `public/data/test/predictions.json`. The cache is matched to the exact input CSV checksum and event ID; no live backend is required for these results. The test file contains no final outcome labels, so test accuracy cannot be calculated from it.
 
+The trained model and model card are publicly available on [Hugging Face](https://huggingface.co/asdvfadsfvvfda/airbus-final-tier-lightgbm-v3).
+
 The model uses only messages at least two days before closest approach, including the early message's provided `risk` as an input. It outputs probabilities for the final recorded Safe, Elevated and Critical tiers. The supplied early-message Pc and latest observed tier remain separate from the forecast. The model does not produce a forecast final Pc.
 
 The evaluation page shows the independently checked internal holdout results (1,781 events), including the baseline comparison and timing caveats. The same event groups were used in an earlier task; the internal fold is not a historically untouched external test.
