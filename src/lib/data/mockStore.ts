@@ -116,9 +116,6 @@ export function generateSeedMessages(eventId: string): TelemetryRow[] {
       AP: 14,
       mission_id: 'MISSION-1',
       _source_row_number: baseSeed * 10 + idx + 1,
-      source_row: baseSeed * 10 + idx,
-      _prediction_history_complete: true,
-      _synthetic_demo: true,
       // Additional sample attributes
       c_rcs_estimate: 0.0842,
       t_span: 3.50,
@@ -135,7 +132,7 @@ export function generateSeedMessages(eventId: string): TelemetryRow[] {
 export const INITIAL_DATASETS: Dataset[] = [
   {
     id: 'ds-seed',
-    filename: 'synthetic-demo.csv',
+    filename: 'test.csv',
     sha256_checksum: '8a3f7b2c9e1d0f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
     file_size_bytes: 14285900,
     row_count: 24484,

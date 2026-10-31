@@ -1,0 +1,73 @@
+{
+  "placeholder": false,
+  "model": "LightGBM final-tier classifier",
+  "task": "Predict the final event tier using messages at least 2 days before closest approach.",
+  "split": {
+    "method": "event-level internal holdout",
+    "held_out_events": 1781,
+    "total_events": 11942
+  },
+  "classes": [
+    "safe",
+    "elevated",
+    "critical"
+  ],
+  "confusion": [
+    [
+      1262,
+      41,
+      4
+    ],
+    [
+      27,
+      304,
+      9
+    ],
+    [
+      3,
+      15,
+      116
+    ]
+  ],
+  "per_class": [
+    {
+      "tier": "safe",
+      "support": 1307,
+      "precision": 0.9767801857585139,
+      "recall": 0.9655700076511095,
+      "f1": 0.9711427472104656
+    },
+    {
+      "tier": "elevated",
+      "support": 340,
+      "precision": 0.8444444444444444,
+      "recall": 0.8941176470588236,
+      "f1": 0.8685714285714287
+    },
+    {
+      "tier": "critical",
+      "support": 134,
+      "precision": 0.8992248062015504,
+      "recall": 0.8656716417910447,
+      "f1": 0.8821292775665398
+    }
+  ],
+  "accuracy": 0.9444132509825941,
+  "macro_f1": 0.9072811511161447,
+  "log_loss": 0.17184378375746412,
+  "class_balance": {
+    "safe": 1307,
+    "elevated": 340,
+    "critical": 134
+  },
+  "future_target": {
+    "events": 1340,
+    "macro_f1": 0.879533921997829,
+    "critical_recall": 0.8163265306122449
+  },
+  "baseline": {
+    "macro_f1": 0.9034013921496341,
+    "critical_recall": 0.8507462686567164
+  },
+  "note": "Internal held-out events from the training file; this same event fold was used in an earlier, different prediction task. The external test file has no final outcome labels."
+}

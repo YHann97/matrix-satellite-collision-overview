@@ -66,7 +66,7 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
   const [rate, setRate] = useState<'auto' | number>('auto');
 
   const latest = message && message.event_id === encounter.event_id ? message : null;
-  const pc = encounter.source_pc;
+  const pc = encounter.predicted_pc ?? encounter.source_pc;
   const geom = encounterGeometry(encounter, latest);
   // Simulated seconds for the whole pass (same path length as the scene uses)
   const passSeconds = (2 * Math.max(2 * geom.miss, 1000)) / geom.speed;

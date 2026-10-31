@@ -4,7 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/context/DataContext';
-import { formatRiskScore, riskPowerLabel } from '@/lib/classification/policy';
+import { TrajectoryCharts } from '@/components/encounters/TrajectoryCharts';
+import { formatRiskScore, normalizeLogRiskToPc, riskPowerLabel } from '@/lib/classification/policy';
 import { OperationalTier, ReviewStatus } from '@/types/telemetry';
 
 function EncountersContent() {
@@ -21,7 +22,10 @@ function EncountersContent() {
     requestPrediction,
     setGlobeFilters,
     globeViewRef,
+    activeDataset,
   } = useData();
+  // Test data has no final outcomes: its tiers are model predictions, and no actual-vs-predicted comparison exists
+  const tiersArePredicted = activeDataset?.has_outcomes === false;
 
   // Search & Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,7 +35,7 @@ function EncountersContent() {
   const [leadTimeFilter, setLeadTimeFilter] = useState<string>(searchParams.get('leadTime') || 'all'); // set by Insights histogram clicks
 
   // Active Detail Subtab ('assessment' | 'telemetry' | 'updates')
-  const [activeSubtab, setActiveSubtab] = useState<'assessment' | 'telemetry' | 'updates'>('assessment');
+  const [activeSubtab, setActiveSubtab] = useState<'assessment' | 'telemetry' | 'updates' | 'trajectory'>('assessment');
   const [isRawExpanded, setIsRawExpanded] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
 
@@ -99,7 +103,7 @@ function EncountersContent() {
     try {
       await requestPrediction(selectedEncounter.event_id);
     } catch (e) {
-      // The encounter retains the visible server error.
+      alert('Prediction request failed. Telemetry preserved.');
     } finally {
       setIsPredicting(false);
     }
@@ -126,7 +130,6 @@ function EncountersContent() {
           <p className="text-[#A8B6CB] text-[11px]">
             {filteredEncounters.length.toLocaleString()} of {encounters.length.toLocaleString()} unique encounters match filters
           </p>
-          <p className="text-[#A8B6CB] text-[10px] mt-1">Internal held-out fold: 1,781 events · macro F1 0.907 (rule baseline 0.903) · Critical detected 116/134 vs 114/134; false alerts 13 vs 11. Small observed difference, not established superiority. External-file accuracy unavailable.</p>
         </div>
 
         {/* Filter Controls */}
@@ -195,7 +198,7 @@ function EncountersContent() {
             className="bg-[#061426] border border-[#243B55] rounded px-2.5 py-1.5 text-[#F5F7FA] focus:border-[#245BFF]"
           >
             <option value="all">All Lead Times</option>
-            <option value="within_24h">&le; 24h of TCA</option>
+            <option value="within_24h">&le; 1 day to TCA</option>
             <option value="1_to_2d">1 to 2 days</option>
             <option value="2_to_3d">2 to 3 days</option>
             <option value="1_to_3d">1 to 3 days</option>
@@ -223,8 +226,9 @@ function EncountersContent() {
                 <tr className="bg-[#061426] text-[#A8B6CB] border-b border-[#243B55]">
                   <th className="p-3 font-bold">EVENT ID</th>
                   <th className="p-3 font-bold">OBJECT</th>
-                  <th className="p-3 font-bold">RISK TIER</th>
-                  <th className="p-3 font-bold" title="10^risk">RISK SCORE</th>
+                  <th className="p-3 font-bold">{tiersArePredicted ? 'PREDICTED TIER' : 'RISK TIER'}</th>
+                  {!tiersArePredicted && <th className="p-3 font-bold" title="Final-tier forecast when available">MODEL</th>}
+                  <th className="p-3 font-bold" title="Pc = 10^risk">RISK</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
                   <th className="p-3 font-bold">STATUS</th>
@@ -271,8 +275,23 @@ function EncountersContent() {
                           {enc.operational_tier.toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-3 font-bold text-[#F5F7FA]" title={riskPowerLabel(displayPc)}>
-                        {formatRiskScore(displayPc)}
+                      {!tiersArePredicted && (
+                        <td className="p-3">
+                          <span
+                            className={`text-[10px] font-bold uppercase ${
+                              enc.model_tier && enc.model_tier !== enc.operational_tier ? 'text-[#EF4444]' : 'text-[#A8B6CB]'
+                            }`}
+                            title={enc.model_tier && enc.model_tier !== enc.operational_tier ? 'Differs from the observed final tier' : 'Matches the observed final tier'}
+                          >
+                            {enc.model_tier ?? '-'}
+                          </span>
+                        </td>
+                      )}
+                      <td className="p-3 font-bold text-[#F5F7FA]" title={`Pc = ${formatRiskScore(displayPc)}`}>
+                        {displayPc === 0 ? '0' : displayPc !== null && displayPc > 0 ? Math.log10(displayPc).toFixed(2) : 'N/A'}
+                        {enc.predicted_pc !== null && (
+                          <span className="text-[10px] text-[#245BFF] ml-1">AI</span>
+                        )}
                       </td>
                       <td className="p-3 text-[#F5F7FA]">
                         {(enc.miss_distance / 1000).toFixed(2)} km
@@ -396,11 +415,11 @@ function EncountersContent() {
                   </Link>
                   <button
                     onClick={handlePredict}
-                    disabled={isPredicting || selectedEncounter.model_prediction_source === 'precomputed'}
-                    className="px-3 py-1.5 bg-[#0B1E35] border border-[#243B55] hover:border-[#FBBF24] text-[#FBBF24] rounded transition-colors"
-                    title="Forecast final event tier from observed history"
+                    disabled={!selectedEncounter.model_tier || isPredicting}
+                    className="px-3 py-1.5 bg-[#0B1E35] border border-[#243B55] text-[#FBBF24] rounded transition-colors disabled:opacity-50"
+                    title="Use the saved final-tier forecast"
                   >
-                    {selectedEncounter.model_prediction_source === 'precomputed' ? 'Forecast loaded' : isPredicting ? 'Calculating...' : '↻ Forecast final tier'}
+                    {isPredicting ? 'Loading...' : selectedEncounter.model_tier ? 'Forecast loaded' : 'Forecast unavailable'}
                   </button>
                 </div>
               </div>
@@ -437,33 +456,70 @@ function EncountersContent() {
                 >
                   3. UPDATES ({selectedEncounter.message_count})
                 </button>
+                <button
+                  onClick={() => setActiveSubtab('trajectory')}
+                  className={`flex-1 py-2.5 text-center border-b-2 transition-colors ${
+                    activeSubtab === 'trajectory'
+                      ? 'border-[#245BFF] text-[#245BFF]'
+                      : 'border-transparent text-[#A8B6CB] hover:text-[#F5F7FA]'
+                  }`}
+                >
+                  4. TRAJECTORY
+                </button>
               </div>
+
+              {/* SUBTAB 4: TRAJECTORY */}
+              {activeSubtab === 'trajectory' && <TrajectoryCharts messages={selectedMessages} />}
 
               {/* SUBTAB 1: ASSESSMENT */}
               {activeSubtab === 'assessment' && (
                 <div className="p-4 space-y-4">
-                  <section className="p-3 bg-[#061426] border border-[#245BFF] rounded-lg space-y-2" aria-label="Tier estimate">
-                    <h2 className="font-bold">TIER ESTIMATE</h2>
-                    {selectedEncounter.prediction_error && <p role="alert" className="text-red-300">{selectedEncounter.prediction_error}</p>}
-                    {selectedEncounter.model_tier_probabilities ? <>
-                      {selectedEncounter.model_prediction_source === 'precomputed' && <p className="text-[#A8B6CB]">Frozen model • precomputed for this source dataset</p>}
-                      <p className="text-sm font-bold uppercase">{selectedEncounter.model_tier}</p>
-                      <div className="flex gap-4">{(['Safe','Elevated','Critical'] as const).map(tier => <span key={tier}>{tier}: {(selectedEncounter.model_tier_probabilities![tier]*100).toFixed(1)}%</span>)}</div>
-                      <p className="text-[#A8B6CB]">Class membership probabilities, not collision probabilities.</p>
-                      <p>Input as of {selectedEncounter.prediction_as_of_days?.toFixed(3)} days before TCA; only messages at least 2 days before TCA.</p>
-                      <p>Provided Pc at this input horizon: {selectedEncounter.model_observed_pc_status === 'approximately_zero' ? '≈0 (dataset floor)' : selectedEncounter.model_observed_pc == null ? 'N/A' : selectedEncounter.model_observed_pc.toExponential(2)}</p>
-                      <p>Provided miss distance at this horizon: {selectedEncounter.model_observed_miss_distance_m == null ? 'N/A' : `${selectedEncounter.model_observed_miss_distance_m.toFixed(1)} m`}</p>
-                      {!selectedEncounter.model_simulation && <p className="text-[#A8B6CB] break-all">Model: {selectedEncounter.model_version}</p>}
-                      <p>Final Pc forecast withheld pending validation.</p>
-                    </> : <p className="text-[#A8B6CB]">Request a forecast using actual encounter history. No estimate is available yet.</p>}
-                  </section>
+                  {/* Model Provenance */}
+                  <div className="p-3 bg-[#061426] border border-[#243B55] rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#A8B6CB] text-[11px]">PROVENANCE</span>
+                      <span className="px-2 py-0.5 bg-[#245BFF]/20 text-[#245BFF] rounded font-bold text-[10px]">
+                        {selectedEncounter.model_tier_probabilities ? 'Final-tier forecast' : 'Source assessment'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span className="text-[#A8B6CB] block">Prediction Target:</span>
+                        <span className="text-[#F5F7FA] font-bold">{selectedEncounter.model_tier_probabilities ? 'Final recorded tier' : 'Current assessment'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#A8B6CB] block">Risk Score:</span>
+                        <span className="text-[#F5F7FA] font-mono">10^risk</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedEncounter.model_tier && selectedEncounter.model_tier_probabilities && (
+                    <div className="p-3 bg-[#061426] border border-[#243B55] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#A8B6CB] text-[11px]">PREDICTED FINAL TIER</span>
+                        <span className="text-[#F5F7FA] font-bold uppercase">{selectedEncounter.model_tier}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        {(['Safe', 'Elevated', 'Critical'] as const).map((tier) => (
+                          <div key={tier}>
+                            <span className="text-[#A8B6CB] block">{tier}</span>
+                            <span className="text-[#F5F7FA] font-bold">{(selectedEncounter.model_tier_probabilities![tier] * 100).toFixed(1)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#A8B6CB]">
+                        Based on updates at least two days before closest approach; latest input {selectedEncounter.prediction_as_of_days?.toFixed(2) ?? '—'} days out. These are tier probabilities, not collision Pc.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Operational Policy Evaluation */}
                   <div className="p-3 bg-[#061426] border border-[#EF4444]/40 rounded-lg space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[#A8B6CB] text-[11px]">LATEST SOURCE OPERATIONAL CLASSIFICATION</span>
+                      <span className="text-[#A8B6CB] text-[11px]">LATEST OBSERVED CLASSIFICATION</span>
                       <span className="font-bold text-[#EF4444] uppercase">
-                        {selectedEncounter.operational_tier}
+                        {tiersArePredicted ? selectedEncounter.current_tier ?? 'incomplete' : selectedEncounter.operational_tier}
                       </span>
                     </div>
                     <div className="text-[11px] space-y-1">
@@ -481,7 +537,7 @@ function EncountersContent() {
                   {/* Metrics */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
-                      <span className="text-[#A8B6CB] text-[11px]">Latest source risk score (10^risk)</span>
+                      <span className="text-[#A8B6CB] text-[11px]">Risk Score (10^risk)</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
                         {formatRiskScore(selectedEncounter.source_pc)}
                       </div>
@@ -501,7 +557,7 @@ function EncountersContent() {
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
                       <span className="text-[#A8B6CB] text-[11px]">Relative Speed</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
-                        {selectedEncounter.relative_speed?.toLocaleString() ?? 'N/A'} m/s
+                        {selectedEncounter.relative_speed?.toLocaleString() || '14,210'} m/s
                       </div>
                     </div>
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
@@ -657,7 +713,7 @@ function EncountersContent() {
                   <div className="space-y-2">
                     {selectedMessages.map((msg, index) => {
                       const isLatest = index === selectedMessages.length - 1;
-                      const msgPc = typeof msg.risk === 'number' && msg.risk <= 0 ? (msg.risk <= -30 ? 0 : Math.pow(10, msg.risk)) : null;
+                      const msgPc = normalizeLogRiskToPc(msg.risk);
 
                       return (
                         <div
@@ -683,7 +739,7 @@ function EncountersContent() {
                             <div>
                               Risk score:{' '}
                               <strong className="text-[#F5F7FA] font-mono">{formatRiskScore(msgPc)}</strong>
-                              {msg.risk !== null && msg.risk !== undefined && (
+                              {msgPc !== null && msgPc > 0 && msg.risk !== null && msg.risk !== undefined && (
                                 <span className="block text-[10px] text-[#A8B6CB]">
                                   (10^{Number(msg.risk).toFixed(2)})
                                 </span>

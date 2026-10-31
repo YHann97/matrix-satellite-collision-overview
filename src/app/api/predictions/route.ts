@@ -1,15 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { handlePrediction } from '@/lib/prediction/service';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
-  try {
-    const result=await handlePrediction(await req.json(),{
-      apiUrl:process.env.PREDICTION_API_URL,apiKey:process.env.PREDICTION_API_KEY,
-      hfToken:process.env.HF_TOKEN,
-      timeoutMs:Number(process.env.PREDICTION_TIMEOUT_MS || 15000),
-    });
-    return NextResponse.json(result.body,{status:result.status});
-  } catch {
-    return NextResponse.json({status:'failed',error:'Invalid JSON request'},{status:400});
-  }
+// The dashboard serves frozen forecasts for the supplied test dataset. A live
+// inference service has not been configured for arbitrary uploaded events.
+export async function POST() {
+  return NextResponse.json({ error: 'Live predictions are currently unavailable.' }, { status: 503 });
 }

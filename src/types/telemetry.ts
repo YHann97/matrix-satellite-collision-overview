@@ -1,4 +1,3 @@
-import type { TierProbabilities, PcStatus } from './prediction';
 export type OperationalTier = 'critical' | 'elevated' | 'safe' | 'incomplete';
 
 export type ReviewStatus = 'unreviewed' | 'acknowledged' | 'in_planning' | 'reviewed';
@@ -61,20 +60,7 @@ export interface EncounterSummary {
   relative_speed: number | null;
   c_object_type: string;
   source_pc: number | null;
-  predicted_pc: number | null; // Legacy storage only. No learned Pc is produced.
-  source_risk_log10_pc?: number | null;
-  source_pc_status?: PcStatus;
-  model_tier_probabilities?: TierProbabilities | null;
-  model_version?: string | null;
-  model_simulation?: boolean;
-  model_prediction_source?: 'live' | 'precomputed' | 'simulation';
-  model_observed_pc?: number | null;
-  model_observed_pc_status?: PcStatus;
-  model_observed_miss_distance_m?: number | null;
-  prediction_as_of_days?: number | null;
-  prediction_completed_at?: string | null;
-  prediction_status?: 'processing' | 'completed' | 'failed';
-  prediction_error?: string | null;
+  predicted_pc: number | null;
   operational_tier: OperationalTier;
   model_tier?: OperationalTier | null;
   classification_reasons: string[];
@@ -87,6 +73,12 @@ export interface EncounterSummary {
   debris_inclination_deg?: number | null; // the other object's orbit, from the c_ columns
   debris_apogee_km?: number | null;
   debris_perigee_km?: number | null;
+  current_tier?: OperationalTier; // tier from the latest CDM (differs from operational_tier on test data)
+  tier_is_predicted?: boolean; // true when operational_tier is a model prediction, not an observed outcome
+  model_confidence?: number | null;
+  model_tier_probabilities?: { Safe: number; Elevated: number; Critical: number } | null;
+  model_version?: string | null;
+  prediction_as_of_days?: number | null;
   has_plan: boolean;
   plan_id?: string | null;
   updated_at: string;
@@ -103,4 +95,10 @@ export interface Dataset {
   error_message?: string | null;
   is_active: boolean;
   created_at: string;
+  kind?: 'train' | 'test';
+  /** false for test data: the final outcome is unknown, so tiers are predictions */
+  has_outcomes?: boolean;
+  /** Folder under /public holding this dataset's encounters.json and history shards */
+  data_path?: string;
+  predicted_counts?: Record<string, number>;
 }

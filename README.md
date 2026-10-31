@@ -99,19 +99,15 @@ The system ingests and groups conjunction telemetry records (such as ESA / Kelvi
 
 ---
 
-## 5. External Prediction Contract (`POST /api/predictions`)
+## 5. Final-tier forecasts
 
-The browser sends the selected event's actual per-update history to the Next.js server, which validates and forwards it to `PREDICTION_API_URL` (the native Python `/v1/predict` endpoint). See [backend/README.md](backend/README.md) for the private model bundle and backend startup. With no `PREDICTION_API_URL`, a deterministic rule-based demonstration runs locally in the Next.js server. The technical API records `simulation:true` and `model_version:"demo-simulation-not-trained"`; these illustrative tier probabilities are not learned or validated. The UI uses a neutral tier-estimate panel. A configured real API always takes priority, and its failures stay visible without falling back to simulation.
+The test dataset opens with 2,167 precomputed predictions from the frozen LightGBM classifier in `public/data/test/predictions.json`. The cache is matched to the exact input CSV checksum and event ID; no live backend is required for these results. The test file contains no final outcome labels, so test accuracy cannot be calculated from it.
 
-The request is `{schema_version:"2.0",dataset_id,event_id,record_id,messages:[...]}`. Each message retains its original `source_row` and per-message `c_object_type`. Only these measurements are forwarded: `time_to_tca`, `miss_distance`, `relative_speed`, `relative_position_r`, `relative_position_t`, `relative_position_n`, `c_object_type`, `c_sigma_r`, `t_sigma_r`, `max_risk_estimate`, `F10`, `AP`, and **observed early `risk`**. Only finite messages at least two days before TCA are eligible; future messages are removed before measurement validation. Final labels, final risk, and other CSV columns never cross this allowlist. Missing measurements remain null.
+The model uses only messages at least two days before closest approach, including the early message's provided `risk` as an input. It outputs probabilities for the final recorded Safe, Elevated and Critical tiers. The supplied early-message Pc and latest observed tier remain separate from the forecast. The model does not produce a forecast final Pc.
 
-The bundled `public/data/predictions.json` contains frozen-model forecasts precomputed for the exact source CSV SHA-256. Startup joins these only when both full source checksum namespace and event ID match. Matching results display immediately without hosting an API and take priority over the demo path. These external-file predictions have no ground-truth accuracy score. The performance card reports the separate 1,781-event internal holdout; its fold had prior same-row-task exposure and the small observed improvement does not establish superiority. No raw CSV or model weights are included in the frontend assets.
+The evaluation page shows the independently checked internal holdout results (1,781 events), including the baseline comparison and timing caveats. The same event groups were used in an earlier task; the internal fold is not a historically untouched external test.
 
-The model forecasts the **final recorded event tier**, with probabilities for Safe, Elevated, and Critical. These class probabilities are not collision probabilities. Final Pc is withheld. The UI displays the model's input horizon and the supplied observed Pc at that horizon separately from the latest source operational assessment (which may include later updates). Model output never overwrites the source Pc or recalculates the current operational policy.
-
-CSV imports retain full event histories in memory per dataset. Static histories must be regenerated with `node --import tsx scripts/build-encounters.ts /path/to/authorized.csv`: version 2 shards store per-update categories and original source rows. Existing legacy shards remain displayable but cannot be used for forecasting; re-import the authorized source CSV. Select `synthetic-demo.csv` in the dataset menu for an immediate simulation using explicitly synthetic messages; they are not real CDMs. Do not use held-out evaluation data to regenerate public assets.
-
-Backend failures appear on the encounter. `PREDICTION_API_KEY` uses server-only `X-API-Key`; optional `HF_TOKEN` supplies private Hugging Face gateway authorization. Neither is a public client environment variable.
+The included `backend/` contains the CPU inference service for future live integration. The current dashboard serves precomputed forecasts, and the Next.js live prediction route responds unavailable until it is wired to a service. Model weights and credentials are not committed to this repository.
 
 ---
 
@@ -136,7 +132,7 @@ cp .env.example .env.local
 Fill in your keys:
 - `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`: Mapbox public access token (get one free at [mapbox.com](https://account.mapbox.com/)).
 - `NEXT_PUBLIC_SUPABASE_URL` & `SUPABASE_SECRET_KEY`: Your Supabase database credentials.
-- `PREDICTION_API_URL`: Full native backend URL, e.g. `http://127.0.0.1:7860/v1/predict`. Optional `PREDICTION_API_KEY`, `HF_TOKEN`, and `PREDICTION_TIMEOUT_MS` are server-only.
+- No prediction-server configuration is needed for the bundled test forecasts.
 
 ### Database Setup (Supabase)
 Apply the complete database migration found in `supabase/migrations/20261031000001_initial_schema.sql` via the Supabase SQL Editor or Supabase CLI:
@@ -186,13 +182,13 @@ npm test
   - Preservation of zero values vs converting empty strings to `null`.
   - Batch parsing and encounter grouping with deterministic tie-breaking.
 - `tests/prediction.test.ts`:
-  - Early-history allowlists, namespace encoding, native response validation, missing/floor Pc, request races, and history provenance.
+  - Strict exclusion of `risk` from model input feature allowlist.
 
 ### Production Build
 ```bash
 npm run build
 ```
-Build and type checks should be run before deployment. This repository currently retains its existing Next.js version; review framework security updates before production use.
+Build output produces optimized static and dynamic routes with zero TypeScript or bundle warnings.
 
 ---
 
@@ -206,6 +202,5 @@ Build and type checks should be run before deployment. This repository currently
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `SUPABASE_SECRET_KEY`
-   - `PREDICTION_API_URL`
-   - `PREDICTION_API_KEY`
+   - No prediction-server settings are needed for the bundled test forecasts.
 4. Deploy. The Next.js 14 App Router configuration will build statically optimized pages and dynamic serverless API endpoints.

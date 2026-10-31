@@ -1,6 +1,4 @@
 'use client';
-import { applyPrecomputed } from '@/lib/prediction/precomputed';
-import { eventKey } from '@/lib/prediction/schema';
 
 import React, { createContext, useContext, useState, useEffect, useRef, MutableRefObject } from 'react';
 import { EncounterSummary, Dataset, TelemetryRow } from '@/types/telemetry';
@@ -13,9 +11,8 @@ import {
 } from '@/lib/data/mockStore';
 import { parseTelemetryCsv } from '@/lib/csv/parser';
 import { groupEncounters } from '@/lib/csv/grouping';
-import { decodeHistory, historyShardOf, historyRowsFor, HistoryShard } from '@/lib/data/history';
-import { messagesForPrediction, predictionKey, isCurrentPrediction, applyPrediction } from '@/lib/prediction/client';
-import type { PredictionResponse } from '@/types/prediction';
+import { decodeHistory, historyShardOf } from '@/lib/data/history';
+import { applyPrecomputed } from '@/lib/prediction/precomputed';
 
 export interface GlobeFilters {
   tier: string;
@@ -64,20 +61,18 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [globeFilters, setGlobeFilters] = useState<GlobeFilters>(DEFAULT_GLOBE_FILTERS);
   const globeViewRef = useRef<GlobeViewState>({ ...DEFAULT_GLOBE_VIEW });
-  const [datasets, setDatasets] = useState<Dataset[]>(INITIAL_DATASETS);
-  const [activeDataset, setActiveDataset] = useState<Dataset | null>(INITIAL_DATASETS[0]);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [activeDataset, setActiveDataset] = useState<Dataset | null>(null);
   const [encounters, setEncounters] = useState<EncounterSummary[]>([]);
   const [selectedEncounter, setSelectedEncounter] = useState<EncounterSummary | null>(null);
   const [selectedMessages, setSelectedMessages] = useState<TelemetryRow[]>([]);
-  const activeDatasetIdRef = useRef(INITIAL_DATASETS[0].id);
-  const datasetEpochRef = useRef(0);
-  const predictionTicketsRef = useRef(new Map<string, number>());
-  const sourceByDatasetRef = useRef(new Map<string, 'static' | 'imported' | 'demo'>([[INITIAL_DATASETS[0].id, 'demo']]));
-  const recordsByDatasetRef = useRef(new Map<string, Map<string, TelemetryRow[]>>());
-  const encounterSnapshotsRef = useRef(new Map<string, EncounterSummary[]>());
-  const historyShardsRef = useRef(new Map<string, Promise<HistoryShard>>());
+  // True when encounters came from encounters.json, whose per-update history is in public/data/history
+  const hasHistoryRef = useRef(false);
+  const historyShardsRef = useRef(new Map<string, Promise<Record<string, (number | null)[][]>>>());
+  // Folder holding the active dataset's history shards. Datasets never share event_ids (they restart per file).
+  const historyBaseRef = useRef('/data/train');
   const messagesRequestRef = useRef(0);
-  const precomputedCacheRef = useRef<any>(null);
+  const datasetRequestRef = useRef(0);
   const [plans, setPlans] = useState<PlanRecord[]>([
     {
       id: 'PLN-881',
@@ -147,11 +142,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     },
   ]);
 
-  // Load the real encounters built by scripts/build-encounters.ts; fall back to generated seed data
+  // The test cache is bound to the CSV checksum, not the reused event IDs.
+  const loadDataset = (ds: Dataset) => {
+    const request = ++datasetRequestRef.current;
+    return Promise.all([
+      fetch(`${ds.data_path}/encounters.json`).then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))),
+      ds.kind === 'test' ? fetch(`${ds.data_path}/predictions.json`).then(res => res.ok ? res.json() : null).catch(() => null) : Promise.resolve(null),
+    ]).then(([data, cache]: [{ encounters: EncounterSummary[] }, any]) => {
+      if (request !== datasetRequestRef.current || !data.encounters?.length) return;
+      const loaded = applyPrecomputed(ds, data.encounters, cache);
+      hasHistoryRef.current = true;
+      historyBaseRef.current = ds.data_path!;
+      messagesRequestRef.current++;
+      setActiveDataset(ds);
+      setDatasets(prev => prev.map(d => ({ ...d, is_active: d.id === ds.id })));
+      setEncounters(loaded);
+      setSelectedEncounter(loaded[0]);
+      loadMessages(loaded[0], ds.data_path!);
+      setGlobeFilters(f => ({ ...f, mission: 'all', focusEventId: null }));
+    });
+  };
+
+  // On start: read the manifest, open the first dataset (train); fall back to generated seed data
   useEffect(() => {
     let cancelled = false;
-    const bootstrapEpoch = datasetEpochRef.current;
     const useSeed = () => {
+      setDatasets(INITIAL_DATASETS);
+      setActiveDataset(INITIAL_DATASETS[0]);
       const seeded = generateSeedEncounters(2167);
       setEncounters(seeded);
       if (seeded.length > 0) {
@@ -160,36 +177,25 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    Promise.all([
-      fetch('/data/encounters.json').then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))),
-      fetch('/data/predictions.json').then(res => res.ok ? res.json() : null).catch(() => null),
-    ])
-      .then(([data, cache]: [{ dataset: Partial<Dataset> & { id: string; filename: string }; encounters: EncounterSummary[] }, any]) => {
-        if (cancelled || datasetEpochRef.current !== bootstrapEpoch || !data.encounters?.length) return;
-        const real: Dataset = {
+    fetch('/data/manifest.json')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((m: { datasets: (Partial<Dataset> & { id: string; filename: string; data_path: string })[] }) => {
+        if (cancelled || !m.datasets?.length) throw new Error('empty manifest');
+        const list: Dataset[] = m.datasets.map((d, i) => ({
           sha256_checksum: '',
           status: 'ready',
-          is_active: true,
+          is_active: i === 0,
           created_at: new Date().toISOString(),
           row_count: 0,
-          encounter_count: data.encounters.length,
+          encounter_count: 0,
           file_size_bytes: 0,
-          ...data.dataset,
-        };
-        setDatasets((prev) => [real, ...prev.map((d) => ({ ...d, is_active: false }))]);
-        activeDatasetIdRef.current = real.id;
-        datasetEpochRef.current++;
-        sourceByDatasetRef.current.set(real.id, 'static');
-        precomputedCacheRef.current = cache;
-        const clean = applyPrecomputed(real, data.encounters.map(e => ({ ...e, dataset_id: real.id, predicted_pc: null, model_tier: null, model_tier_probabilities: null, model_version: null, model_simulation: false, prediction_status: undefined, prediction_error: null, model_observed_pc: null, model_observed_pc_status: undefined, model_observed_miss_distance_m: null, prediction_as_of_days: null })), cache);
-        encounterSnapshotsRef.current.set(real.id, clean);
-        setActiveDataset(real);
-        setEncounters(clean);
-        setSelectedEncounter(clean[0]);
-        loadMessages(clean[0], real.id);
+          ...d,
+        }));
+        setDatasets(list);
+        return loadDataset(list.find(d => d.kind === 'test') ?? list[0]);
       })
       .catch(() => {
-        if (!cancelled && datasetEpochRef.current === bootstrapEpoch) useSeed();
+        if (!cancelled) useSeed();
       });
 
     return () => {
@@ -197,42 +203,31 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (encounters.length && encounters.every(e => e.dataset_id === activeDatasetIdRef.current)) {
-      encounterSnapshotsRef.current.set(activeDatasetIdRef.current, encounters);
-    }
-  }, [encounters]);
-
-  const getMessages = async (enc: EncounterSummary, datasetId: string): Promise<TelemetryRow[]> => {
-    const imported = recordsByDatasetRef.current.get(datasetId);
-    if (imported) return imported.get(enc.event_id) ?? [];
-    if (sourceByDatasetRef.current.get(datasetId) === 'demo') return generateSeedMessages(enc.event_id);
-    if (sourceByDatasetRef.current.get(datasetId) !== 'static') throw new Error('Source history is unavailable. Import a telemetry CSV.');
-    const shard = historyShardOf(enc.event_id);
-    const key = JSON.stringify([datasetId, shard]);
-    let pending = historyShardsRef.current.get(key);
-    if (!pending) {
-      pending = fetch(`/data/history/${shard}.json`).then(res => res.ok ? res.json() : Promise.reject(new Error(`History unavailable: HTTP ${res.status}`)));
-      historyShardsRef.current.set(key, pending!);
-    }
-    try {
-      const history = historyRowsFor(await pending!, enc.event_id);
-      return decodeHistory(history.rows, enc, history.fields, history.version);
-    } catch (e) { historyShardsRef.current.delete(key); throw e; }
-  };
-
-  const loadMessages = (enc: EncounterSummary, datasetId = activeDatasetIdRef.current) => {
-    const request = ++messagesRequestRef.current;
-    setSelectedMessages([]);
-    if (sourceByDatasetRef.current.get(datasetId) === 'demo') {
+  const loadMessages = (enc: EncounterSummary, base: string = historyBaseRef.current) => {
+    if (!hasHistoryRef.current) {
       setSelectedMessages(generateSeedMessages(enc.event_id));
       return;
     }
-    getMessages(enc, datasetId).then(rows => {
-      if (request === messagesRequestRef.current && datasetId === activeDatasetIdRef.current) setSelectedMessages(rows);
-    }).catch(() => {
-      if (request === messagesRequestRef.current && datasetId === activeDatasetIdRef.current) setSelectedMessages([]);
-    });
+    const request = ++messagesRequestRef.current;
+    const shard = historyShardOf(enc.event_id);
+    const cacheKey = `${base}:${shard}`;
+    let pending = historyShardsRef.current.get(cacheKey);
+    if (!pending) {
+      pending = fetch(`${base}/history/${shard}.json`).then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))
+      );
+      historyShardsRef.current.set(cacheKey, pending);
+    }
+    setSelectedMessages([]);
+    pending
+      .then((rows) => {
+        if (request !== messagesRequestRef.current) return; // a newer selection superseded this one
+        setSelectedMessages(decodeHistory(rows[enc.event_id] ?? [], enc));
+      })
+      .catch(() => {
+        historyShardsRef.current.delete(cacheKey);
+        if (request === messagesRequestRef.current) setSelectedMessages([]);
+      });
   };
 
   const selectEncounterById = (eventId: string) => {
@@ -273,7 +268,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const createOrUpdatePlan = (planData: Partial<PlanRecord> & { event_id: string }): PlanRecord => {
-    const existing = plans.find((p) => p.event_id === planData.event_id && p.dataset_id === activeDatasetIdRef.current);
+    const existing = plans.find((p) => p.event_id === planData.event_id && p.dataset_id === activeDataset?.id);
     const event = encounters.find((e) => e.event_id === planData.event_id);
 
     if (existing) {
@@ -330,57 +325,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const requestPrediction = async (eventId: string) => {
-    const datasetId = activeDatasetIdRef.current;
-    const event = encounters.find(e => e.event_id === eventId && e.dataset_id === datasetId);
-    if (!event) throw new Error('Encounter is not part of the active dataset');
-    if (event.model_prediction_source === 'precomputed' && event.model_tier_probabilities) return null;
-    const key = predictionKey(datasetId, eventId);
-    const ticket = (predictionTicketsRef.current.get(key) ?? 0) + 1;
-    predictionTicketsRef.current.set(key, ticket);
-    const captured = { datasetId, epoch: datasetEpochRef.current, ticket };
-    const current = () => isCurrentPrediction(captured, {
-      datasetId: activeDatasetIdRef.current, epoch: datasetEpochRef.current,
-      ticket: predictionTicketsRef.current.get(key) ?? 0,
-    });
-    const update = (fn: (e: EncounterSummary) => EncounterSummary) => {
-      if (!current()) return;
-      setEncounters(prev => prev.map(e => e.dataset_id === datasetId && e.event_id === eventId ? fn(e) : e));
-      setSelectedEncounter(prev => prev?.dataset_id === datasetId && prev.event_id === eventId ? fn(prev) : prev);
-    };
-    update(e => ({ ...e, prediction_status: 'processing', prediction_error: null }));
-    try {
-      const messages = messagesForPrediction(await getMessages(event, datasetId), eventId);
-      if (!current()) return null;
-      const res = await fetch('/api/predictions', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dataset_id: datasetId, event_id: eventId,
-          record_id: event.latest_record_id, schema_version: '2.0', messages }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Prediction failed: HTTP ${res.status}`);
-      const response = data as PredictionResponse;
-      if (response.dataset_id !== datasetId || response.event_id !== eventId || response.event_key !== eventKey(datasetId,eventId)) throw new Error('Prediction response belongs to a different encounter');
-      update(e => applyPrediction(e, response));
-      if (current()) recordAuditEvent({ event_id: eventId, action_type: 'FINAL-TIER FORECAST UPDATED',
-        operator_email: 'system_model', summary: `${datasetId}: ${response.classification}; model ${response.model_version}; input as of ${response.input_time_to_tca_days.toFixed(3)} days before TCA. No Pc forecast produced.` });
-      return response;
-    } catch (err) {
-      update(e => ({ ...e, prediction_status: 'failed', prediction_error: err instanceof Error ? err.message : 'Prediction unavailable' }));
-      throw err;
-    }
+    const event = encounters.find(e => e.event_id === eventId && e.dataset_id === activeDataset?.id);
+    if (event?.tier_is_predicted && event.model_tier_probabilities) return event;
+    throw new Error('A final-tier forecast is not available for this encounter.');
   };
 
   const importCsvDataset = async (csvText: string, filename: string): Promise<Dataset> => {
+    ++datasetRequestRef.current;
     const parseResult = parseTelemetryCsv(csvText);
-    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(csvText));
-    const checksum=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
-    const newDatasetId = `sha256:${checksum}`;
+    const newDatasetId = `ds-${Date.now()}`;
     const grouped = groupEncounters(newDatasetId, parseResult.rows);
 
     const newDataset: Dataset = {
       id: newDatasetId,
       filename,
-      sha256_checksum: checksum,
+      sha256_checksum: `sha256-${Date.now()}`,
       file_size_bytes: csvText.length,
       row_count: parseResult.totalRows,
       encounter_count: grouped.encounters.length,
@@ -389,24 +348,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       created_at: new Date().toISOString(),
     };
 
-    grouped.encounters = applyPrecomputed(newDataset, grouped.encounters, precomputedCacheRef.current);
     setDatasets((prev) => [
       newDataset,
-      ...prev.filter((d) => d.id !== newDatasetId).map((d) => ({ ...d, is_active: false })),
+      ...prev.map((d) => ({ ...d, is_active: false })),
     ]);
-    encounterSnapshotsRef.current.set(activeDatasetIdRef.current, encounters);
-    encounterSnapshotsRef.current.set(newDatasetId, grouped.encounters);
-    recordsByDatasetRef.current.set(newDatasetId, grouped.recordsByEvent);
-    sourceByDatasetRef.current.set(newDatasetId, 'imported');
-    activeDatasetIdRef.current = newDatasetId;
-    datasetEpochRef.current++;
-    messagesRequestRef.current++;
+    hasHistoryRef.current = false;
     setActiveDataset(newDataset);
     setEncounters(grouped.encounters);
     if (grouped.encounters.length > 0) {
       setSelectedEncounter(grouped.encounters[0]);
       setSelectedMessages(grouped.recordsByEvent.get(grouped.encounters[0].event_id) || []);
-    } else { setSelectedEncounter(null); setSelectedMessages([]); }
+    }
 
     recordAuditEvent({
       event_id: 'SYSTEM',
@@ -419,23 +371,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const switchDataset = (datasetId: string) => {
-    const target = datasets.find(d => d.id === datasetId);
-    if (!target || datasetId === activeDatasetIdRef.current) return;
-    encounterSnapshotsRef.current.set(activeDatasetIdRef.current, encounters);
-    activeDatasetIdRef.current = datasetId;
-    datasetEpochRef.current++;
-    messagesRequestRef.current++;
-    if (datasetId === 'ds-seed' && !encounterSnapshotsRef.current.has(datasetId)) {
-      encounterSnapshotsRef.current.set(datasetId, generateSeedEncounters(24));
-      sourceByDatasetRef.current.set(datasetId, 'demo');
+    const target = datasets.find((d) => d.id === datasetId);
+    if (!target) return;
+    if (target.data_path) {
+      loadDataset(target).catch((err) => console.error('Could not load dataset', err));
+    } else {
+      setDatasets((prev) => prev.map((d) => ({ ...d, is_active: d.id === datasetId })));
+      setActiveDataset(target);
     }
-    const restored = encounterSnapshotsRef.current.get(datasetId) ?? [];
-    setDatasets(prev => prev.map(d => ({ ...d, is_active: d.id === datasetId })));
-    setActiveDataset(target);
-    setEncounters(restored);
-    setSelectedEncounter(restored[0] ?? null);
-    setSelectedMessages([]);
-    if (restored[0]) loadMessages(restored[0], datasetId);
   };
 
   const exportAuditCsv = () => {
