@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, MutableRefObject } from 'react';
 import { EncounterSummary, Dataset, TelemetryRow } from '@/types/telemetry';
 import {
   generateSeedEncounters,
@@ -11,8 +11,34 @@ import {
 } from '@/lib/data/mockStore';
 import { parseTelemetryCsv } from '@/lib/csv/parser';
 import { groupEncounters } from '@/lib/csv/grouping';
+import { decodeHistory, historyShardOf } from '@/lib/data/history';
+
+export interface GlobeFilters {
+  tier: string;
+  mission: string;
+  maxMarkers: number;
+  noteCollapsed: boolean; // globe disclaimer panel
+  cardMinimized: boolean; // selected-encounter card
+  headerCollapsed: boolean; // page header filters
+  controlsCollapsed: boolean; // top-right globe controls
+  focusEventId: string | null; // when set, the globe shows only this encounter
+}
+
+export interface GlobeViewState {
+  angle: number;
+  zoom: number;
+  rotating: boolean;
+  pitch: number; // vertical tilt in degrees
+}
+
+export const DEFAULT_GLOBE_FILTERS: GlobeFilters = { tier: 'all', mission: 'all', maxMarkers: 50, noteCollapsed: true, cardMinimized: false, headerCollapsed: false, controlsCollapsed: false, focusEventId: null };
+export const DEFAULT_GLOBE_VIEW: GlobeViewState = { angle: 0, zoom: 1, rotating: false, pitch: 0 };
 
 interface DataContextType {
+  // Globe settings live here so they survive navigating to another page and back
+  globeFilters: GlobeFilters;
+  setGlobeFilters: React.Dispatch<React.SetStateAction<GlobeFilters>>;
+  globeViewRef: MutableRefObject<GlobeViewState>;
   datasets: Dataset[];
   activeDataset: Dataset | null;
   encounters: EncounterSummary[];
@@ -32,11 +58,17 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
+  const [globeFilters, setGlobeFilters] = useState<GlobeFilters>(DEFAULT_GLOBE_FILTERS);
+  const globeViewRef = useRef<GlobeViewState>({ ...DEFAULT_GLOBE_VIEW });
   const [datasets, setDatasets] = useState<Dataset[]>(INITIAL_DATASETS);
   const [activeDataset, setActiveDataset] = useState<Dataset | null>(INITIAL_DATASETS[0]);
   const [encounters, setEncounters] = useState<EncounterSummary[]>([]);
   const [selectedEncounter, setSelectedEncounter] = useState<EncounterSummary | null>(null);
   const [selectedMessages, setSelectedMessages] = useState<TelemetryRow[]>([]);
+  // True when encounters came from encounters.json, whose per-update history is in public/data/history
+  const hasHistoryRef = useRef(false);
+  const historyShardsRef = useRef(new Map<number, Promise<Record<string, (number | null)[][]>>>());
+  const messagesRequestRef = useRef(0);
   const [plans, setPlans] = useState<PlanRecord[]>([
     {
       id: 'PLN-881',
@@ -106,21 +138,79 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     },
   ]);
 
-  // Initialize seed data
+  // Load the real encounters built by scripts/build-encounters.ts; fall back to generated seed data
   useEffect(() => {
-    const seeded = generateSeedEncounters(2167);
-    setEncounters(seeded);
-    if (seeded.length > 0) {
-      setSelectedEncounter(seeded[0]);
-      setSelectedMessages(generateSeedMessages(seeded[0].event_id));
-    }
+    let cancelled = false;
+    const useSeed = () => {
+      const seeded = generateSeedEncounters(2167);
+      setEncounters(seeded);
+      if (seeded.length > 0) {
+        setSelectedEncounter(seeded[0]);
+        setSelectedMessages(generateSeedMessages(seeded[0].event_id));
+      }
+    };
+
+    fetch('/data/encounters.json')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: { dataset: Partial<Dataset> & { id: string; filename: string }; encounters: EncounterSummary[] }) => {
+        if (cancelled || !data.encounters?.length) return;
+        const real: Dataset = {
+          sha256_checksum: '',
+          status: 'ready',
+          is_active: true,
+          created_at: new Date().toISOString(),
+          row_count: 0,
+          encounter_count: data.encounters.length,
+          file_size_bytes: 0,
+          ...data.dataset,
+        };
+        setDatasets((prev) => [real, ...prev.map((d) => ({ ...d, is_active: false }))]);
+        setActiveDataset(real);
+        hasHistoryRef.current = true;
+        setEncounters(data.encounters);
+        setSelectedEncounter(data.encounters[0]);
+        loadMessages(data.encounters[0]);
+      })
+      .catch(() => {
+        if (!cancelled) useSeed();
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const loadMessages = (enc: EncounterSummary) => {
+    if (!hasHistoryRef.current) {
+      setSelectedMessages(generateSeedMessages(enc.event_id));
+      return;
+    }
+    const request = ++messagesRequestRef.current;
+    const shard = historyShardOf(enc.event_id);
+    let pending = historyShardsRef.current.get(shard);
+    if (!pending) {
+      pending = fetch(`/data/history/${shard}.json`).then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))
+      );
+      historyShardsRef.current.set(shard, pending);
+    }
+    setSelectedMessages([]);
+    pending
+      .then((rows) => {
+        if (request !== messagesRequestRef.current) return; // a newer selection superseded this one
+        setSelectedMessages(decodeHistory(rows[enc.event_id] ?? [], enc));
+      })
+      .catch(() => {
+        historyShardsRef.current.delete(shard);
+        if (request === messagesRequestRef.current) setSelectedMessages([]);
+      });
+  };
 
   const selectEncounterById = (eventId: string) => {
     const found = encounters.find((e) => e.event_id === eventId);
     if (found) {
       setSelectedEncounter(found);
-      setSelectedMessages(generateSeedMessages(found.event_id));
+      loadMessages(found);
     }
   };
 
@@ -281,6 +371,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       newDataset,
       ...prev.map((d) => ({ ...d, is_active: false })),
     ]);
+    hasHistoryRef.current = false;
     setActiveDataset(newDataset);
     setEncounters(grouped.encounters);
     if (grouped.encounters.length > 0) {
@@ -329,6 +420,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   return (
     <DataContext.Provider
       value={{
+        globeFilters,
+        setGlobeFilters,
+        globeViewRef,
         datasets,
         activeDataset,
         encounters,

@@ -69,6 +69,10 @@ export interface EncounterSummary {
   lat: number;
   lon: number;
   altitude_km: number;
+  inclination_deg?: number | null; // real target orbit inclination, when the data has it
+  debris_inclination_deg?: number | null; // the other object's orbit, from the c_ columns
+  debris_apogee_km?: number | null;
+  debris_perigee_km?: number | null;
   has_plan: boolean;
   plan_id?: string | null;
   updated_at: string;

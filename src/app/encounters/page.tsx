@@ -18,6 +18,8 @@ function EncountersContent() {
     acknowledgeEncounter,
     createOrUpdatePlan,
     requestPrediction,
+    setGlobeFilters,
+    globeViewRef,
   } = useData();
 
   // Search & Filter States
@@ -25,7 +27,7 @@ function EncountersContent() {
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [objectFilter, setObjectFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [leadTimeFilter, setLeadTimeFilter] = useState<string>('all');
+  const [leadTimeFilter, setLeadTimeFilter] = useState<string>(searchParams.get('leadTime') || 'all'); // set by Insights histogram clicks
 
   // Active Detail Subtab ('assessment' | 'telemetry' | 'updates')
   const [activeSubtab, setActiveSubtab] = useState<'assessment' | 'telemetry' | 'updates'>('assessment');
@@ -56,14 +58,16 @@ function EncountersContent() {
     if (statusFilter !== 'all' && enc.review_status !== statusFilter) {
       return false;
     }
-    if (leadTimeFilter === 'within_24h') {
-      return enc.min_time_to_tca >= 0 && enc.min_time_to_tca <= 1.0;
-    }
-    if (leadTimeFilter === '1_to_3d') {
-      return enc.min_time_to_tca > 1.0 && enc.min_time_to_tca <= 3.0;
-    }
-    if (leadTimeFilter === 'gt_3d') {
-      return enc.min_time_to_tca > 3.0;
+    const t = enc.min_time_to_tca;
+    switch (leadTimeFilter) {
+      case 'within_24h': return t <= 1.0; // includes encounters already at/after TCA
+      case '1_to_2d': return t > 1.0 && t <= 2.0;
+      case '2_to_3d': return t > 2.0 && t <= 3.0;
+      case '1_to_3d': return t > 1.0 && t <= 3.0;
+      case '3_to_5d': return t > 3.0 && t <= 5.0;
+      case '5_to_7d': return t > 5.0 && t <= 7.0;
+      case 'gt_7d': return t > 7.0;
+      case 'gt_3d': return t > 3.0;
     }
     return true;
   });
@@ -189,8 +193,13 @@ function EncountersContent() {
             className="bg-[#061426] border border-[#243B55] rounded px-2.5 py-1.5 text-[#F5F7FA] focus:border-[#245BFF]"
           >
             <option value="all">All Lead Times</option>
-            <option value="within_24h">&le; 24h of TCA [0&le;t&le;1]</option>
+            <option value="within_24h">&le; 24h of TCA</option>
+            <option value="1_to_2d">1 to 2 days</option>
+            <option value="2_to_3d">2 to 3 days</option>
             <option value="1_to_3d">1 to 3 days</option>
+            <option value="3_to_5d">3 to 5 days</option>
+            <option value="5_to_7d">5 to 7 days</option>
+            <option value="gt_7d">&gt; 7 days</option>
             <option value="gt_3d">&gt; 3 days</option>
           </select>
         </div>
@@ -372,6 +381,16 @@ function EncountersContent() {
                   </button>
                   <Link
                     href="/globe"
+                    onClick={() => {
+                      // Show only this encounter on the globe, turned to face it
+                      globeViewRef.current = {
+                        angle: selectedEncounter.lon,
+                        pitch: selectedEncounter.lat,
+                        zoom: 1.4,
+                        rotating: false,
+                      };
+                      setGlobeFilters((f) => ({ ...f, focusEventId: selectedEncounter.event_id }));
+                    }}
                     className="px-3 py-1.5 bg-[#0B1E35] border border-[#243B55] hover:border-[#245BFF] text-[#F5F7FA] rounded transition-colors"
                   >
                     View on Globe

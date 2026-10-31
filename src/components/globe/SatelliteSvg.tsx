@@ -54,15 +54,9 @@ export function SatelliteSvg({
         <circle cx="12" cy="4" r="1.5" fill={color} />
       </svg>
 
-      {/* Selected Secondary Object Diamond Indicator */}
+      {/* Selection ring (the debris marker is drawn by GlobeView) */}
       {isSelected && (
-        <>
-          <div
-            className="absolute -bottom-2 -right-2 w-3 h-3 bg-white rotate-45 border border-black shadow-[0_0_8px_white]"
-            title="Secondary Object in Conjunction"
-          />
-          <div className="absolute -inset-1.5 border border-white rounded-full animate-ping opacity-60 pointer-events-none" />
-        </>
+        <div className="absolute -inset-1.5 border border-white rounded-full animate-ping opacity-60 pointer-events-none" />
       )}
     </div>
   );

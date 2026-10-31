@@ -1,6 +1,7 @@
 import { TelemetryRow, EncounterSummary } from '@/types/telemetry';
 import { classifyOperationalRisk, normalizeLogRiskToPc } from '@/lib/classification/policy';
 import { getSimulatedCoordinates } from '@/lib/geo/displayPositions';
+import { orbitDisplayFromRow } from '@/lib/geo/orbit';
 
 export interface GroupingResult {
   encounters: EncounterSummary[];
@@ -44,7 +45,8 @@ export function groupEncounters(
     const latest = sorted[0];
     const sourcePc = normalizeLogRiskToPc(latest.risk);
     const classification = classifyOperationalRisk(sourcePc, latest.miss_distance);
-    const coords = getSimulatedCoordinates(eventId);
+    const orbit = orbitDisplayFromRow(latest, eventId, latest.mission_id);
+    const coords = orbit ?? getSimulatedCoordinates(eventId);
 
     const summary: EncounterSummary = {
       id: `${datasetId}_${eventId}`,
@@ -66,6 +68,10 @@ export function groupEncounters(
       lat: coords.lat,
       lon: coords.lon,
       altitude_km: coords.altitude_km,
+      inclination_deg: orbit?.inclination_deg ?? null,
+      debris_inclination_deg: orbit?.debris_inclination_deg ?? null,
+      debris_apogee_km: orbit?.debris_apogee_km ?? null,
+      debris_perigee_km: orbit?.debris_perigee_km ?? null,
       has_plan: false,
       plan_id: null,
       updated_at: new Date().toISOString(),
