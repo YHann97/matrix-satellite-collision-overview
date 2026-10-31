@@ -3,7 +3,8 @@ import path from 'path';
 import crypto from 'crypto';
 import Papa from 'papaparse';
 import { createClient } from '@supabase/supabase-js';
-import { groupTelemetryByEncounter, parseNumericCell } from '../src/lib/csv/grouping';
+import { groupEncounters } from '../src/lib/csv/grouping';
+import { parseNumericCell } from '../src/lib/csv/parser';
 import { TelemetryRow } from '../src/types/telemetry';
 
 async function main() {
@@ -79,6 +80,7 @@ async function main() {
       id: `${datasetId}-${rowNum}`,
       dataset_id: datasetId,
       event_id: eventId,
+      _source_row_number: rowNum,
       source_row_number: rowNum,
       mission_id: missionId,
       time_to_tca: parseNumericCell(r['time_to_tca']),
@@ -103,7 +105,7 @@ async function main() {
   console.log(`\x1b[34m[INFO]\x1b[0m Valid rows: ${rows.length} | Rejected rows: ${rejectedRows.length}`);
 
   // Build encounter summaries
-  const encounterSummaries = groupTelemetryByEncounter(rows, datasetId);
+  const { encounters: encounterSummaries } = groupEncounters(datasetId, rows);
   console.log(`\x1b[32m[SUCCESS]\x1b[0m Grouped into ${encounterSummaries.length} unique encounters.`);
 
   // Statistics
@@ -242,17 +244,17 @@ async function main() {
         dataset_id: e.dataset_id,
         event_id: e.event_id,
         mission_id: e.mission_id,
-        update_count: e.update_count,
+        message_count: e.message_count,
         latest_record_id: e.latest_record_id,
         operational_tier: e.operational_tier,
         review_status: e.review_status,
         min_time_to_tca: e.min_time_to_tca,
-        latest_miss_distance: e.latest_miss_distance,
-        latest_relative_speed: e.latest_relative_speed,
-        latest_risk: e.latest_risk,
-        latest_pc: e.latest_pc,
+        miss_distance: e.miss_distance,
+        relative_speed: e.relative_speed,
+        source_pc: e.source_pc,
+        predicted_pc: e.predicted_pc,
         c_object_type: e.c_object_type,
-        primary_reason_code: e.primary_reason_code,
+        classification_reasons: e.classification_reasons,
       }))
     );
     if (encError) {
