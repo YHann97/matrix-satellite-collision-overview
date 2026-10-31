@@ -60,14 +60,16 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [globeFilters, setGlobeFilters] = useState<GlobeFilters>(DEFAULT_GLOBE_FILTERS);
   const globeViewRef = useRef<GlobeViewState>({ ...DEFAULT_GLOBE_VIEW });
-  const [datasets, setDatasets] = useState<Dataset[]>(INITIAL_DATASETS);
-  const [activeDataset, setActiveDataset] = useState<Dataset | null>(INITIAL_DATASETS[0]);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [activeDataset, setActiveDataset] = useState<Dataset | null>(null);
   const [encounters, setEncounters] = useState<EncounterSummary[]>([]);
   const [selectedEncounter, setSelectedEncounter] = useState<EncounterSummary | null>(null);
   const [selectedMessages, setSelectedMessages] = useState<TelemetryRow[]>([]);
   // True when encounters came from encounters.json, whose per-update history is in public/data/history
   const hasHistoryRef = useRef(false);
-  const historyShardsRef = useRef(new Map<number, Promise<Record<string, (number | null)[][]>>>());
+  const historyShardsRef = useRef(new Map<string, Promise<Record<string, (number | null)[][]>>>());
+  // Folder holding the active dataset's history shards. Datasets never share event_ids (they restart per file).
+  const historyBaseRef = useRef('/data/train');
   const messagesRequestRef = useRef(0);
   const [plans, setPlans] = useState<PlanRecord[]>([
     {
@@ -138,10 +140,31 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     },
   ]);
 
-  // Load the real encounters built by scripts/build-encounters.ts; fall back to generated seed data
+  // Load a dataset built by scripts/build-encounters.ts (encounters + history live in its own folder)
+  const loadDataset = (ds: Dataset) => {
+    return fetch(`${ds.data_path}/encounters.json`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: { encounters: EncounterSummary[] }) => {
+        if (!data.encounters?.length) return;
+        hasHistoryRef.current = true;
+        historyBaseRef.current = ds.data_path!;
+        messagesRequestRef.current++;
+        setActiveDataset(ds);
+        setDatasets((prev) => prev.map((d) => ({ ...d, is_active: d.id === ds.id })));
+        setEncounters(data.encounters);
+        setSelectedEncounter(data.encounters[0]);
+        loadMessages(data.encounters[0], ds.data_path!);
+        // Filters from the previous dataset (mission, focus) may not exist here
+        setGlobeFilters((f) => ({ ...f, mission: 'all', focusEventId: null }));
+      });
+  };
+
+  // On start: read the manifest, open the first dataset (train); fall back to generated seed data
   useEffect(() => {
     let cancelled = false;
     const useSeed = () => {
+      setDatasets(INITIAL_DATASETS);
+      setActiveDataset(INITIAL_DATASETS[0]);
       const seeded = generateSeedEncounters(2167);
       setEncounters(seeded);
       if (seeded.length > 0) {
@@ -150,26 +173,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    fetch('/data/encounters.json')
+    fetch('/data/manifest.json')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data: { dataset: Partial<Dataset> & { id: string; filename: string }; encounters: EncounterSummary[] }) => {
-        if (cancelled || !data.encounters?.length) return;
-        const real: Dataset = {
+      .then((m: { datasets: (Partial<Dataset> & { id: string; filename: string; data_path: string })[] }) => {
+        if (cancelled || !m.datasets?.length) throw new Error('empty manifest');
+        const list: Dataset[] = m.datasets.map((d, i) => ({
           sha256_checksum: '',
           status: 'ready',
-          is_active: true,
+          is_active: i === 0,
           created_at: new Date().toISOString(),
           row_count: 0,
-          encounter_count: data.encounters.length,
+          encounter_count: 0,
           file_size_bytes: 0,
-          ...data.dataset,
-        };
-        setDatasets((prev) => [real, ...prev.map((d) => ({ ...d, is_active: false }))]);
-        setActiveDataset(real);
-        hasHistoryRef.current = true;
-        setEncounters(data.encounters);
-        setSelectedEncounter(data.encounters[0]);
-        loadMessages(data.encounters[0]);
+          ...d,
+        }));
+        setDatasets(list);
+        return loadDataset(list[0]);
       })
       .catch(() => {
         if (!cancelled) useSeed();
@@ -180,19 +199,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const loadMessages = (enc: EncounterSummary) => {
+  const loadMessages = (enc: EncounterSummary, base: string = historyBaseRef.current) => {
     if (!hasHistoryRef.current) {
       setSelectedMessages(generateSeedMessages(enc.event_id));
       return;
     }
     const request = ++messagesRequestRef.current;
     const shard = historyShardOf(enc.event_id);
-    let pending = historyShardsRef.current.get(shard);
+    const cacheKey = `${base}:${shard}`;
+    let pending = historyShardsRef.current.get(cacheKey);
     if (!pending) {
-      pending = fetch(`/data/history/${shard}.json`).then((res) =>
+      pending = fetch(`${base}/history/${shard}.json`).then((res) =>
         res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))
       );
-      historyShardsRef.current.set(shard, pending);
+      historyShardsRef.current.set(cacheKey, pending);
     }
     setSelectedMessages([]);
     pending
@@ -201,7 +221,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setSelectedMessages(decodeHistory(rows[enc.event_id] ?? [], enc));
       })
       .catch(() => {
-        historyShardsRef.current.delete(shard);
+        historyShardsRef.current.delete(cacheKey);
         if (request === messagesRequestRef.current) setSelectedMessages([]);
       });
   };
@@ -244,7 +264,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const createOrUpdatePlan = (planData: Partial<PlanRecord> & { event_id: string }): PlanRecord => {
-    const existing = plans.find((p) => p.event_id === planData.event_id);
+    const existing = plans.find((p) => p.event_id === planData.event_id && p.dataset_id === activeDataset?.id);
     const event = encounters.find((e) => e.event_id === planData.event_id);
 
     if (existing) {
@@ -272,7 +292,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         assigned_operator: planData.assigned_operator || 'unassigned',
         assessment_rationale: planData.assessment_rationale || '',
         proposed_action: planData.proposed_action || '',
-        baseline_pc: event?.predicted_pc || event?.source_pc || null,
+        baseline_pc: event?.predicted_pc ?? event?.source_pc ?? null,
         baseline_miss_distance: event?.miss_distance || null,
         baseline_lead_time: event?.min_time_to_tca || null,
         baseline_model_version: 'v1.0.4',
@@ -391,10 +411,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const switchDataset = (datasetId: string) => {
     const target = datasets.find((d) => d.id === datasetId);
-    if (target) {
-      setDatasets((prev) =>
-        prev.map((d) => ({ ...d, is_active: d.id === datasetId }))
-      );
+    if (!target) return;
+    if (target.data_path) {
+      loadDataset(target).catch((err) => console.error('Could not load dataset', err));
+    } else {
+      setDatasets((prev) => prev.map((d) => ({ ...d, is_active: d.id === datasetId })));
       setActiveDataset(target);
     }
   };

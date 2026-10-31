@@ -73,6 +73,9 @@ export interface EncounterSummary {
   debris_inclination_deg?: number | null; // the other object's orbit, from the c_ columns
   debris_apogee_km?: number | null;
   debris_perigee_km?: number | null;
+  current_tier?: OperationalTier; // tier from the latest CDM (differs from operational_tier on test data)
+  tier_is_predicted?: boolean; // true when operational_tier is a model prediction, not an observed outcome
+  model_confidence?: number | null;
   has_plan: boolean;
   plan_id?: string | null;
   updated_at: string;
@@ -89,4 +92,10 @@ export interface Dataset {
   error_message?: string | null;
   is_active: boolean;
   created_at: string;
+  kind?: 'train' | 'test';
+  /** false for test data: the final outcome is unknown, so tiers are predictions */
+  has_outcomes?: boolean;
+  /** Folder under /public holding this dataset's encounters.json and history shards */
+  data_path?: string;
+  predicted_counts?: Record<string, number>;
 }

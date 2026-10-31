@@ -4,7 +4,8 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/context/DataContext';
-import { formatRiskScore, riskPowerLabel } from '@/lib/classification/policy';
+import { TrajectoryCharts } from '@/components/encounters/TrajectoryCharts';
+import { formatRiskScore, normalizeLogRiskToPc, riskPowerLabel } from '@/lib/classification/policy';
 import { OperationalTier, ReviewStatus } from '@/types/telemetry';
 
 function EncountersContent() {
@@ -21,7 +22,10 @@ function EncountersContent() {
     requestPrediction,
     setGlobeFilters,
     globeViewRef,
+    activeDataset,
   } = useData();
+  // Test data has no final outcomes: its tiers are model predictions, and no actual-vs-predicted comparison exists
+  const tiersArePredicted = activeDataset?.has_outcomes === false;
 
   // Search & Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,7 +35,7 @@ function EncountersContent() {
   const [leadTimeFilter, setLeadTimeFilter] = useState<string>(searchParams.get('leadTime') || 'all'); // set by Insights histogram clicks
 
   // Active Detail Subtab ('assessment' | 'telemetry' | 'updates')
-  const [activeSubtab, setActiveSubtab] = useState<'assessment' | 'telemetry' | 'updates'>('assessment');
+  const [activeSubtab, setActiveSubtab] = useState<'assessment' | 'telemetry' | 'updates' | 'trajectory'>('assessment');
   const [isRawExpanded, setIsRawExpanded] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
 
@@ -194,7 +198,7 @@ function EncountersContent() {
             className="bg-[#061426] border border-[#243B55] rounded px-2.5 py-1.5 text-[#F5F7FA] focus:border-[#245BFF]"
           >
             <option value="all">All Lead Times</option>
-            <option value="within_24h">&le; 24h of TCA</option>
+            <option value="within_24h">&le; 1 day to TCA</option>
             <option value="1_to_2d">1 to 2 days</option>
             <option value="2_to_3d">2 to 3 days</option>
             <option value="1_to_3d">1 to 3 days</option>
@@ -222,8 +226,9 @@ function EncountersContent() {
                 <tr className="bg-[#061426] text-[#A8B6CB] border-b border-[#243B55]">
                   <th className="p-3 font-bold">EVENT ID</th>
                   <th className="p-3 font-bold">OBJECT</th>
-                  <th className="p-3 font-bold">RISK TIER</th>
-                  <th className="p-3 font-bold" title="10^risk">RISK SCORE</th>
+                  <th className="p-3 font-bold">{tiersArePredicted ? 'PREDICTED TIER' : 'RISK TIER'}</th>
+                  {!tiersArePredicted && <th className="p-3 font-bold" title="Placeholder model prediction of the final tier">MODEL</th>}
+                  <th className="p-3 font-bold" title="Pc = 10^risk">RISK</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
                   <th className="p-3 font-bold">STATUS</th>
@@ -270,8 +275,20 @@ function EncountersContent() {
                           {enc.operational_tier.toUpperCase()}
                         </span>
                       </td>
-                      <td className="p-3 font-bold text-[#F5F7FA]" title={riskPowerLabel(displayPc)}>
-                        {formatRiskScore(displayPc)}
+                      {!tiersArePredicted && (
+                        <td className="p-3">
+                          <span
+                            className={`text-[10px] font-bold uppercase ${
+                              enc.model_tier && enc.model_tier !== enc.operational_tier ? 'text-[#EF4444]' : 'text-[#A8B6CB]'
+                            }`}
+                            title={enc.model_tier && enc.model_tier !== enc.operational_tier ? 'Differs from the observed final tier' : 'Matches the observed final tier'}
+                          >
+                            {enc.model_tier ?? '-'}
+                          </span>
+                        </td>
+                      )}
+                      <td className="p-3 font-bold text-[#F5F7FA]" title={`Pc = ${formatRiskScore(displayPc)}`}>
+                        {displayPc === 0 ? '0' : displayPc !== null && displayPc > 0 ? Math.log10(displayPc).toFixed(2) : 'N/A'}
                         {enc.predicted_pc !== null && (
                           <span className="text-[10px] text-[#245BFF] ml-1">AI</span>
                         )}
@@ -439,7 +456,20 @@ function EncountersContent() {
                 >
                   3. UPDATES ({selectedEncounter.message_count})
                 </button>
+                <button
+                  onClick={() => setActiveSubtab('trajectory')}
+                  className={`flex-1 py-2.5 text-center border-b-2 transition-colors ${
+                    activeSubtab === 'trajectory'
+                      ? 'border-[#245BFF] text-[#245BFF]'
+                      : 'border-transparent text-[#A8B6CB] hover:text-[#F5F7FA]'
+                  }`}
+                >
+                  4. TRAJECTORY
+                </button>
               </div>
+
+              {/* SUBTAB 4: TRAJECTORY */}
+              {activeSubtab === 'trajectory' && <TrajectoryCharts messages={selectedMessages} />}
 
               {/* SUBTAB 1: ASSESSMENT */}
               {activeSubtab === 'assessment' && (
@@ -463,6 +493,34 @@ function EncountersContent() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Model prediction (placeholder until the real model's output is loaded) */}
+                  {selectedEncounter.model_tier && (
+                    <div className="p-3 bg-[#061426] border border-[#243B55] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#A8B6CB] text-[11px]">PREDICTED FINAL TIER</span>
+                        <span className="px-2 py-0.5 bg-[#FBBF24]/15 text-[#FBBF24] rounded font-bold text-[10px]">PLACEHOLDER</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-[#A8B6CB] block">Prediction (CDMs &ge; 2 d out):</span>
+                          <span className="text-[#F5F7FA] font-bold uppercase">{selectedEncounter.model_tier}</span>
+                          {selectedEncounter.model_confidence != null && (
+                            <span className="text-[#A8B6CB]"> ({Math.round(selectedEncounter.model_confidence * 100)}%)</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-[#A8B6CB] block">{tiersArePredicted ? 'Tier at latest CDM:' : 'Observed final tier:'}</span>
+                          <span className="text-[#F5F7FA] font-bold uppercase">
+                            {tiersArePredicted ? selectedEncounter.current_tier : selectedEncounter.operational_tier}
+                          </span>
+                        </div>
+                      </div>
+                      {tiersArePredicted && (
+                        <p className="text-[10px] text-[#A8B6CB]">Test data has no final outcome, so the tier shown for this encounter is the prediction.</p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Operational Policy Evaluation */}
                   <div className="p-3 bg-[#061426] border border-[#EF4444]/40 rounded-lg space-y-2">
@@ -663,7 +721,7 @@ function EncountersContent() {
                   <div className="space-y-2">
                     {selectedMessages.map((msg, index) => {
                       const isLatest = index === selectedMessages.length - 1;
-                      const msgPc = msg.risk !== null && msg.risk !== undefined ? Math.pow(10, msg.risk) : null;
+                      const msgPc = normalizeLogRiskToPc(msg.risk);
 
                       return (
                         <div
@@ -689,7 +747,7 @@ function EncountersContent() {
                             <div>
                               Risk score:{' '}
                               <strong className="text-[#F5F7FA] font-mono">{formatRiskScore(msgPc)}</strong>
-                              {msg.risk !== null && msg.risk !== undefined && (
+                              {msgPc !== null && msgPc > 0 && msg.risk !== null && msg.risk !== undefined && (
                                 <span className="block text-[10px] text-[#A8B6CB]">
                                   (10^{Number(msg.risk).toFixed(2)})
                                 </span>

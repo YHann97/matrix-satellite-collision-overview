@@ -1,0 +1,62 @@
+{
+  "placeholder": true,
+  "model": "Placeholder (simulated)",
+  "note": "Simulated predictions, not a trained model. Replace this file with real held-out results (same shape).",
+  "task": "Predict the final tier (from the last CDM before closest approach) using only CDMs with time_to_tca >= 2 days",
+  "split": {
+    "method": "by event_id, about 80/20",
+    "held_out_events": 2631,
+    "total_events": 13154
+  },
+  "classes": [
+    "critical",
+    "elevated",
+    "safe"
+  ],
+  "confusion": [
+    [
+      127,
+      40,
+      13
+    ],
+    [
+      40,
+      316,
+      128
+    ],
+    [
+      0,
+      129,
+      1838
+    ]
+  ],
+  "per_class": [
+    {
+      "tier": "critical",
+      "support": 180,
+      "precision": 0.7604790419161677,
+      "recall": 0.7055555555555556,
+      "f1": 0.7319884726224783
+    },
+    {
+      "tier": "elevated",
+      "support": 484,
+      "precision": 0.6515463917525773,
+      "recall": 0.6528925619834711,
+      "f1": 0.6522187822497421
+    },
+    {
+      "tier": "safe",
+      "support": 1967,
+      "precision": 0.9287518948964123,
+      "recall": 0.9344178952719878,
+      "f1": 0.9315762797769894
+    }
+  ],
+  "accuracy": 0.8669707335613835,
+  "class_balance": {
+    "critical": 180,
+    "elevated": 484,
+    "safe": 1967
+  }
+}

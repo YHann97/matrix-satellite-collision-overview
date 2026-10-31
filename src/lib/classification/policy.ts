@@ -123,10 +123,15 @@ export function classifyOperationalRisk(
 /**
  * Normalizes log10(Pc) to linear probability Pc: Pc = 10^(log10Pc)
  */
+/** log10(Pc) at or below this is the dataset's "no risk" floor. */
+export const RISK_FLOOR_LOG10 = -30;
+
 export function normalizeLogRiskToPc(log10Pc: number | null | undefined): number | null {
   if (log10Pc === null || log10Pc === undefined || !Number.isFinite(log10Pc)) {
     return null;
   }
+  // A risk of -30 is the dataset's floor for "effectively zero": treat it as zero probability
+  if (log10Pc <= RISK_FLOOR_LOG10) return 0;
   const pc = Math.pow(10, log10Pc);
   if (!Number.isFinite(pc) || pc < 0) return null;
   return Math.min(pc, 1.0);
@@ -137,6 +142,7 @@ export function normalizeLogRiskToPc(log10Pc: number | null | undefined): number
  * Displayed in scientific notation, e.g. 1.20e-4.
  */
 export function formatRiskScore(score: number | null | undefined, digits = 2): string {
+  if (score === 0) return '0';
   return typeof score === 'number' && Number.isFinite(score) ? score.toExponential(digits) : 'N/A';
 }
 

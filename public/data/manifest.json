@@ -1,0 +1,48 @@
+{
+  "datasets": [
+    {
+      "id": "ds-train",
+      "filename": "train_data.csv",
+      "file_size_bytes": 233600296,
+      "row_count": 162634,
+      "encounter_count": 13154,
+      "kind": "train",
+      "has_outcomes": true,
+      "data_path": "/data/train",
+      "predicted_counts": {
+        "critical": 840,
+        "elevated": 2407,
+        "safe": 9907,
+        "incomplete": 0
+      },
+      "tier_counts": {
+        "critical": 908,
+        "elevated": 2403,
+        "safe": 9843,
+        "incomplete": 0
+      }
+    },
+    {
+      "id": "ds-test",
+      "filename": "test_data.csv",
+      "file_size_bytes": 35303060,
+      "row_count": 24484,
+      "encounter_count": 2167,
+      "kind": "test",
+      "has_outcomes": false,
+      "data_path": "/data/test",
+      "predicted_counts": {
+        "critical": 218,
+        "elevated": 461,
+        "safe": 1488,
+        "incomplete": 0
+      },
+      "tier_counts": {
+        "critical": 218,
+        "elevated": 461,
+        "safe": 1488,
+        "incomplete": 0
+      }
+    }
+  ]
+}

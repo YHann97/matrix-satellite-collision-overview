@@ -22,6 +22,7 @@ export function Header() {
     { label: '3. INSIGHTS', href: '/insights' },
     { label: '4. PLANNING', href: '/planning' },
     { label: '5. HISTORY', href: '/history' },
+    { label: '6. EVALUATION', href: '/evaluation' },
   ];
 
   return (

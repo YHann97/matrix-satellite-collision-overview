@@ -58,7 +58,7 @@ export default function InsightsPage() {
   const binGt7 = encounters.filter((e) => e.min_time_to_tca > 7.0).length;
 
   const bins = [
-    { label: '≤1d (≤24h)', count: bin0to1, filterKey: 'within_24h', color: '#EF4444' },
+    { label: '≤1d to TCA', count: bin0to1, filterKey: 'within_24h', color: '#EF4444' },
     { label: '1-2d', count: bin1to2, filterKey: '1_to_2d', color: '#245BFF' },
     { label: '2-3d', count: bin2to3, filterKey: '2_to_3d', color: '#245BFF' },
     { label: '3-5d', count: bin3to5, filterKey: '3_to_5d', color: '#245BFF' },
