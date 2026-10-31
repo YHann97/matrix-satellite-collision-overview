@@ -76,6 +76,9 @@ export interface EncounterSummary {
   current_tier?: OperationalTier; // tier from the latest CDM (differs from operational_tier on test data)
   tier_is_predicted?: boolean; // true when operational_tier is a model prediction, not an observed outcome
   model_confidence?: number | null;
+  model_tier_probabilities?: { Safe: number; Elevated: number; Critical: number } | null;
+  model_version?: string | null;
+  prediction_as_of_days?: number | null;
   has_plan: boolean;
   plan_id?: string | null;
   updated_at: string;

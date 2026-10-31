@@ -6,16 +6,17 @@
  * Usage: npx tsx scripts/build-encounters.ts <path/to/file.csv> [--name train|test]
  *   --name defaults to "test" when the filename contains "test", otherwise "train".
  *
- * Predicted tiers come from src/lib/model/placeholder.ts (simulated). Swap in real model output later.
+ * Tiers built here are source assessments; predictions and evaluation come from separately verified model artifacts.
+ * Rebuilding a dataset never writes model_eval.json.
  */
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 import Papa from 'papaparse';
 import { groupEncounters } from '../src/lib/csv/grouping';
 import { parseNumericCell } from '../src/lib/csv/parser';
 import { TelemetryRow } from '../src/types/telemetry';
 import { HISTORY_FIELDS, HISTORY_SHARDS, historyShardOf } from '../src/lib/data/history';
-import { isHeldOut, PLACEHOLDER_MODEL_NAME, placeholderPredict } from '../src/lib/model/placeholder';
 
 const NUMERIC = [
   'time_to_tca', 'miss_distance', 'relative_speed', 'risk', 'max_risk_estimate',
@@ -40,6 +41,14 @@ const counts = new Map<string, number>();
 const lastLat = new Map<string, number>();
 const history = new Map<string, (number | null)[][]>();
 let totalRows = 0;
+// Hash the exact source bytes, so a prediction cache can only bind to the file it scored.
+const sha256 = new Promise<string>((resolve, reject) => {
+  const hash = createHash('sha256');
+  const input = fs.createReadStream(filePath);
+  input.on('data', (chunk) => hash.update(chunk));
+  input.on('error', reject);
+  input.on('end', () => resolve(hash.digest('hex')));
+});
 
 Papa.parse(fs.createReadStream(filePath, { encoding: 'utf-8' }) as any, {
   header: true,
@@ -72,7 +81,8 @@ Papa.parse(fs.createReadStream(filePath, { encoding: 'utf-8' }) as any, {
     for (const k of NUMERIC) row[k] = parseNumericCell(r[k]);
     best.set(eventId, row);
   },
-  complete: () => {
+  complete: async () => {
+    const sourceSha256 = await sha256;
     for (const [id, row] of best) {
       if (row.geocentric_latitude == null) row.geocentric_latitude = lastLat.get(id) ?? null;
     }
@@ -80,52 +90,15 @@ Papa.parse(fs.createReadStream(filePath, { encoding: 'utf-8' }) as any, {
     const { encounters } = groupEncounters(datasetId, [...best.values()]);
     for (const e of encounters) e.message_count = counts.get(e.event_id) ?? 1;
 
-    // Placeholder final-tier predictions. Train has observed final tiers; test has none, so its tier IS the prediction.
-    const tiers = ['critical', 'elevated', 'safe'] as const;
-    const predictedCounts: Record<string, number> = { critical: 0, elevated: 0, safe: 0, incomplete: 0 };
+    // Keep source assessments available for navigation, but never synthesize forecasts.
+    // Test assessments are from the latest available CDM; they are not final outcomes.
     const tierCounts: Record<string, number> = { critical: 0, elevated: 0, safe: 0, incomplete: 0 };
-    const confusion = tiers.map(() => tiers.map(() => 0));
     for (const e of encounters) {
-      const pred = placeholderPredict(`${kind}:${e.event_id}`, e.operational_tier);
-      e.model_tier = pred.tier;
-      e.model_confidence = pred.confidence;
+      e.model_tier = null;
+      e.model_confidence = null;
       e.current_tier = e.operational_tier;
-      if (kind === 'test') {
-        e.operational_tier = pred.tier;
-        e.tier_is_predicted = true;
-      } else if (isHeldOut(e.event_id)) {
-        const i = tiers.indexOf(e.operational_tier as (typeof tiers)[number]);
-        const j = tiers.indexOf(pred.tier as (typeof tiers)[number]);
-        if (i >= 0 && j >= 0) confusion[i][j]++;
-      }
-      predictedCounts[pred.tier]++;
+      e.tier_is_predicted = false;
       tierCounts[e.operational_tier]++;
-    }
-
-    if (kind === 'train') {
-      const total = confusion.flat().reduce((s, n) => s + n, 0);
-      const perClass = tiers.map((tier, i) => {
-        const tp = confusion[i][i];
-        const actual = confusion[i].reduce((s, n) => s + n, 0);
-        const predicted = confusion.reduce((s, row) => s + row[i], 0);
-        const precision = predicted ? tp / predicted : 0;
-        const recall = actual ? tp / actual : 0;
-        return { tier: tier, support: actual, precision, recall, f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0 };
-      });
-      const evalOut = {
-        placeholder: true,
-        model: PLACEHOLDER_MODEL_NAME,
-        note: 'Simulated predictions, not a trained model. Replace this file with real held-out results (same shape).',
-        task: 'Predict the final tier (from the last CDM before closest approach) using only CDMs with time_to_tca >= 2 days',
-        split: { method: 'by event_id, about 80/20', held_out_events: total, total_events: encounters.length },
-        classes: tiers,
-        confusion, // rows = actual, columns = predicted, order = classes
-        per_class: perClass,
-        accuracy: total ? confusion.reduce((s, row, i) => s + row[i], 0) / total : 0,
-        class_balance: Object.fromEntries(tiers.map((tier, i) => [tier, confusion[i].reduce((s, n) => s + n, 0)])),
-      };
-      fs.mkdirSync(outDir, { recursive: true });
-      fs.writeFileSync(path.join(outDir, 'model_eval.json'), JSON.stringify(evalOut, null, 2));
     }
 
     // Per-update history, oldest message first (largest time_to_tca), sharded by event
@@ -142,13 +115,13 @@ Papa.parse(fs.createReadStream(filePath, { encoding: 'utf-8' }) as any, {
       dataset: {
         id: datasetId,
         filename: path.basename(filePath),
+        sha256_checksum: sourceSha256,
         file_size_bytes: fs.statSync(filePath).size,
         row_count: totalRows,
         encounter_count: encounters.length,
         kind,
         has_outcomes: kind === 'train',
         data_path: `/data/${kind}`,
-        predicted_counts: predictedCounts,
       },
       encounters,
     };

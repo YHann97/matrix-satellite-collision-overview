@@ -227,7 +227,7 @@ function EncountersContent() {
                   <th className="p-3 font-bold">EVENT ID</th>
                   <th className="p-3 font-bold">OBJECT</th>
                   <th className="p-3 font-bold">{tiersArePredicted ? 'PREDICTED TIER' : 'RISK TIER'}</th>
-                  {!tiersArePredicted && <th className="p-3 font-bold" title="Placeholder model prediction of the final tier">MODEL</th>}
+                  {!tiersArePredicted && <th className="p-3 font-bold" title="Final-tier forecast when available">MODEL</th>}
                   <th className="p-3 font-bold" title="Pc = 10^risk">RISK</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
@@ -237,7 +237,7 @@ function EncountersContent() {
               <tbody className="divide-y divide-[#243B55]">
                 {paginatedEncounters.map((enc) => {
                   const isSelected = selectedEncounter?.event_id === enc.event_id;
-                  const displayPc = enc.predicted_pc !== null ? enc.predicted_pc : enc.source_pc;
+                  const displayPc = enc.source_pc;
 
                   return (
                     <tr
@@ -415,11 +415,11 @@ function EncountersContent() {
                   </Link>
                   <button
                     onClick={handlePredict}
-                    disabled={isPredicting}
-                    className="px-3 py-1.5 bg-[#0B1E35] border border-[#243B55] hover:border-[#FBBF24] text-[#FBBF24] rounded transition-colors"
-                    title="Request prediction from external model"
+                    disabled={!selectedEncounter.model_tier || isPredicting}
+                    className="px-3 py-1.5 bg-[#0B1E35] border border-[#243B55] text-[#FBBF24] rounded transition-colors disabled:opacity-50"
+                    title="Use the saved final-tier forecast"
                   >
-                    {isPredicting ? 'Calculating...' : '↻ Request Pred'}
+                    {isPredicting ? 'Loading...' : selectedEncounter.model_tier ? 'Forecast loaded' : 'Forecast unavailable'}
                   </button>
                 </div>
               </div>
@@ -479,13 +479,13 @@ function EncountersContent() {
                     <div className="flex items-center justify-between">
                       <span className="text-[#A8B6CB] text-[11px]">PROVENANCE</span>
                       <span className="px-2 py-0.5 bg-[#245BFF]/20 text-[#245BFF] rounded font-bold text-[10px]">
-                        {selectedEncounter.predicted_pc !== null ? 'External Model v1.0.4' : 'Source Assessment Baseline'}
+                        {selectedEncounter.model_tier_probabilities ? 'Final-tier forecast' : 'Source assessment'}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                       <div>
                         <span className="text-[#A8B6CB] block">Prediction Target:</span>
-                        <span className="text-[#F5F7FA] font-bold">Current Assessment</span>
+                        <span className="text-[#F5F7FA] font-bold">{selectedEncounter.model_tier_probabilities ? 'Final recorded tier' : 'Current assessment'}</span>
                       </div>
                       <div>
                         <span className="text-[#A8B6CB] block">Risk Score:</span>
@@ -494,40 +494,32 @@ function EncountersContent() {
                     </div>
                   </div>
 
-                  {/* Model prediction (placeholder until the real model's output is loaded) */}
-                  {selectedEncounter.model_tier && (
+                  {selectedEncounter.model_tier && selectedEncounter.model_tier_probabilities && (
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded-lg space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[#A8B6CB] text-[11px]">PREDICTED FINAL TIER</span>
-                        <span className="px-2 py-0.5 bg-[#FBBF24]/15 text-[#FBBF24] rounded font-bold text-[10px]">PLACEHOLDER</span>
+                        <span className="text-[#F5F7FA] font-bold uppercase">{selectedEncounter.model_tier}</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div>
-                          <span className="text-[#A8B6CB] block">Prediction (CDMs &ge; 2 d out):</span>
-                          <span className="text-[#F5F7FA] font-bold uppercase">{selectedEncounter.model_tier}</span>
-                          {selectedEncounter.model_confidence != null && (
-                            <span className="text-[#A8B6CB]"> ({Math.round(selectedEncounter.model_confidence * 100)}%)</span>
-                          )}
-                        </div>
-                        <div>
-                          <span className="text-[#A8B6CB] block">{tiersArePredicted ? 'Tier at latest CDM:' : 'Observed final tier:'}</span>
-                          <span className="text-[#F5F7FA] font-bold uppercase">
-                            {tiersArePredicted ? selectedEncounter.current_tier : selectedEncounter.operational_tier}
-                          </span>
-                        </div>
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        {(['Safe', 'Elevated', 'Critical'] as const).map((tier) => (
+                          <div key={tier}>
+                            <span className="text-[#A8B6CB] block">{tier}</span>
+                            <span className="text-[#F5F7FA] font-bold">{(selectedEncounter.model_tier_probabilities![tier] * 100).toFixed(1)}%</span>
+                          </div>
+                        ))}
                       </div>
-                      {tiersArePredicted && (
-                        <p className="text-[10px] text-[#A8B6CB]">Test data has no final outcome, so the tier shown for this encounter is the prediction.</p>
-                      )}
+                      <p className="text-[10px] text-[#A8B6CB]">
+                        Based on updates at least two days before closest approach; latest input {selectedEncounter.prediction_as_of_days?.toFixed(2) ?? '—'} days out. These are tier probabilities, not collision Pc.
+                      </p>
                     </div>
                   )}
 
                   {/* Operational Policy Evaluation */}
                   <div className="p-3 bg-[#061426] border border-[#EF4444]/40 rounded-lg space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[#A8B6CB] text-[11px]">OPERATIONAL CLASSIFICATION</span>
+                      <span className="text-[#A8B6CB] text-[11px]">LATEST OBSERVED CLASSIFICATION</span>
                       <span className="font-bold text-[#EF4444] uppercase">
-                        {selectedEncounter.operational_tier}
+                        {tiersArePredicted ? selectedEncounter.current_tier ?? 'incomplete' : selectedEncounter.operational_tier}
                       </span>
                     </div>
                     <div className="text-[11px] space-y-1">
@@ -547,10 +539,10 @@ function EncountersContent() {
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
                       <span className="text-[#A8B6CB] text-[11px]">Risk Score (10^risk)</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
-                        {formatRiskScore(selectedEncounter.predicted_pc ?? selectedEncounter.source_pc)}
+                        {formatRiskScore(selectedEncounter.source_pc)}
                       </div>
                       <div className="text-[10px] text-[#A8B6CB] font-mono">
-                        {riskPowerLabel(selectedEncounter.predicted_pc ?? selectedEncounter.source_pc)}
+                        {riskPowerLabel(selectedEncounter.source_pc)}
                       </div>
                     </div>
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">

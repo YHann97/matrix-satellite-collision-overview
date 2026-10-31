@@ -99,24 +99,15 @@ The system ingests and groups conjunction telemetry records (such as ESA / Kelvi
 
 ---
 
-## 5. External Prediction Contract (`POST /api/predictions`)
+## 5. Final-tier forecasts
 
-The application integrates with machine-learning prediction services:
+The test dataset opens with 2,167 precomputed predictions from the frozen LightGBM classifier in `public/data/test/predictions.json`. The cache is matched to the exact input CSV checksum and event ID; no live backend is required for these results. The test file contains no final outcome labels, so test accuracy cannot be calculated from it.
 
-```text
-CSV Ingestion → Supabase Records → POST /api/predictions → External ML Service → Supabase & UI
-```
+The model uses only messages at least two days before closest approach, including the early message's provided `risk` as an input. It outputs probabilities for the final recorded Safe, Elevated and Critical tiers. The supplied early-message Pc and latest observed tier remain separate from the forecast. The model does not produce a forecast final Pc.
 
-### Feature Allowlist
-Per Section 7 of the specification, the model feature vector strictly **excludes** `risk` and target labels to prevent data leakage:
-- **Allowed Features:** `time_to_tca`, `miss_distance`, `relative_speed`, `relative_position_r`, `relative_position_t`, `relative_position_n`, `c_object_type`, `c_sigma_r`, `t_sigma_r`, `max_risk_estimate`, `F10`, `AP`.
+The evaluation page shows the independently checked internal holdout results (1,781 events), including the baseline comparison and timing caveats. The same event groups were used in an earlier task; the internal fold is not a historically untouched external test.
 
-### Operational Risk Policy Boundaries:
-- **Critical:** $P_c \ge 10^{-4}$ OR $\text{miss\_distance} < 1,000\,\text{m}$
-- **Elevated:** $P_c \ge 10^{-6}$ OR $1,000\,\text{m} \le \text{miss\_distance} \le 5,000\,\text{m}$
-- **Safe:** $\text{miss\_distance} > 5,000\,\text{m}$ AND $P_c < 10^{-6}$
-- **Incomplete:** Missing required telemetry data without a deterministic calculation.
-- **Discrepancy Detection:** Flags if an external model classifies an event as "safe" when physical miss distance $< 1,000\,\text{m}$ violates operational policy.
+The included `backend/` contains the CPU inference service for future live integration. The current dashboard serves precomputed forecasts, and the Next.js live prediction route responds unavailable until it is wired to a service. Model weights and credentials are not committed to this repository.
 
 ---
 
@@ -141,7 +132,7 @@ cp .env.example .env.local
 Fill in your keys:
 - `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`: Mapbox public access token (get one free at [mapbox.com](https://account.mapbox.com/)).
 - `NEXT_PUBLIC_SUPABASE_URL` & `SUPABASE_SECRET_KEY`: Your Supabase database credentials.
-- `PREDICTION_MODE`: Set to `stub` for built-in simulation or `external` to call an external API.
+- No prediction-server configuration is needed for the bundled test forecasts.
 
 ### Database Setup (Supabase)
 Apply the complete database migration found in `supabase/migrations/20261031000001_initial_schema.sql` via the Supabase SQL Editor or Supabase CLI:
@@ -211,7 +202,5 @@ Build output produces optimized static and dynamic routes with zero TypeScript o
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `SUPABASE_SECRET_KEY`
-   - `PREDICTION_MODE` (`external` or `stub`)
-   - `PREDICTION_API_URL`
-   - `PREDICTION_API_KEY`
+   - No prediction-server settings are needed for the bundled test forecasts.
 4. Deploy. The Next.js 14 App Router configuration will build statically optimized pages and dynamic serverless API endpoints.

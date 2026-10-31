@@ -12,6 +12,7 @@ import {
 import { parseTelemetryCsv } from '@/lib/csv/parser';
 import { groupEncounters } from '@/lib/csv/grouping';
 import { decodeHistory, historyShardOf } from '@/lib/data/history';
+import { applyPrecomputed } from '@/lib/prediction/precomputed';
 
 export interface GlobeFilters {
   tier: string;
@@ -71,6 +72,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // Folder holding the active dataset's history shards. Datasets never share event_ids (they restart per file).
   const historyBaseRef = useRef('/data/train');
   const messagesRequestRef = useRef(0);
+  const datasetRequestRef = useRef(0);
   const [plans, setPlans] = useState<PlanRecord[]>([
     {
       id: 'PLN-881',
@@ -140,23 +142,25 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     },
   ]);
 
-  // Load a dataset built by scripts/build-encounters.ts (encounters + history live in its own folder)
+  // The test cache is bound to the CSV checksum, not the reused event IDs.
   const loadDataset = (ds: Dataset) => {
-    return fetch(`${ds.data_path}/encounters.json`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((data: { encounters: EncounterSummary[] }) => {
-        if (!data.encounters?.length) return;
-        hasHistoryRef.current = true;
-        historyBaseRef.current = ds.data_path!;
-        messagesRequestRef.current++;
-        setActiveDataset(ds);
-        setDatasets((prev) => prev.map((d) => ({ ...d, is_active: d.id === ds.id })));
-        setEncounters(data.encounters);
-        setSelectedEncounter(data.encounters[0]);
-        loadMessages(data.encounters[0], ds.data_path!);
-        // Filters from the previous dataset (mission, focus) may not exist here
-        setGlobeFilters((f) => ({ ...f, mission: 'all', focusEventId: null }));
-      });
+    const request = ++datasetRequestRef.current;
+    return Promise.all([
+      fetch(`${ds.data_path}/encounters.json`).then(res => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))),
+      ds.kind === 'test' ? fetch(`${ds.data_path}/predictions.json`).then(res => res.ok ? res.json() : null).catch(() => null) : Promise.resolve(null),
+    ]).then(([data, cache]: [{ encounters: EncounterSummary[] }, any]) => {
+      if (request !== datasetRequestRef.current || !data.encounters?.length) return;
+      const loaded = applyPrecomputed(ds, data.encounters, cache);
+      hasHistoryRef.current = true;
+      historyBaseRef.current = ds.data_path!;
+      messagesRequestRef.current++;
+      setActiveDataset(ds);
+      setDatasets(prev => prev.map(d => ({ ...d, is_active: d.id === ds.id })));
+      setEncounters(loaded);
+      setSelectedEncounter(loaded[0]);
+      loadMessages(loaded[0], ds.data_path!);
+      setGlobeFilters(f => ({ ...f, mission: 'all', focusEventId: null }));
+    });
   };
 
   // On start: read the manifest, open the first dataset (train); fall back to generated seed data
@@ -188,7 +192,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           ...d,
         }));
         setDatasets(list);
-        return loadDataset(list[0]);
+        return loadDataset(list.find(d => d.kind === 'test') ?? list[0]);
       })
       .catch(() => {
         if (!cancelled) useSeed();
@@ -292,10 +296,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         assigned_operator: planData.assigned_operator || 'unassigned',
         assessment_rationale: planData.assessment_rationale || '',
         proposed_action: planData.proposed_action || '',
-        baseline_pc: event?.predicted_pc ?? event?.source_pc ?? null,
+        baseline_pc: event?.source_pc ?? null,
         baseline_miss_distance: event?.miss_distance || null,
         baseline_lead_time: event?.min_time_to_tca || null,
-        baseline_model_version: 'v1.0.4',
+        baseline_model_version: event?.model_version ?? 'source-assessment',
         is_stale: false,
         updated_at: new Date().toISOString(),
       };
@@ -321,56 +325,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const requestPrediction = async (eventId: string) => {
-    try {
-      const res = await fetch('/api/predictions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dataset_id: activeDataset?.id || 'ds-active',
-          event_id: eventId,
-          record_id: selectedEncounter?.latest_record_id || `rec-${eventId}`,
-          schema_version: '1.0',
-        }),
-      });
-      const data = await res.json();
-      if (data && data.probability_constant !== undefined) {
-        setEncounters((prev) =>
-          prev.map((e) =>
-            e.event_id === eventId
-              ? {
-                  ...e,
-                  predicted_pc: data.probability_constant,
-                  model_tier: data.classification,
-                }
-              : e
-          )
-        );
-        if (selectedEncounter?.event_id === eventId) {
-          setSelectedEncounter((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  predicted_pc: data.probability_constant,
-                  model_tier: data.classification,
-                }
-              : null
-          );
-        }
-        recordAuditEvent({
-          event_id: eventId,
-          action_type: 'PREDICTION REFRESHED',
-          operator_email: 'system_model',
-          summary: `Model returned risk score: ${data.probability_constant.toExponential(2)}, tier: ${data.classification}`,
-        });
-      }
-      return data;
-    } catch (err) {
-      console.error('Prediction request error:', err);
-      throw err;
-    }
+    const event = encounters.find(e => e.event_id === eventId && e.dataset_id === activeDataset?.id);
+    if (event?.tier_is_predicted && event.model_tier_probabilities) return event;
+    throw new Error('A final-tier forecast is not available for this encounter.');
   };
 
   const importCsvDataset = async (csvText: string, filename: string): Promise<Dataset> => {
+    ++datasetRequestRef.current;
     const parseResult = parseTelemetryCsv(csvText);
     const newDatasetId = `ds-${Date.now()}`;
     const grouped = groupEncounters(newDatasetId, parseResult.rows);

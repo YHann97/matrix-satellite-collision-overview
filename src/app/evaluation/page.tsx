@@ -14,6 +14,10 @@ interface ModelEval {
   confusion: number[][]; // rows = actual, columns = predicted
   per_class: { tier: string; support: number; precision: number; recall: number; f1: number }[];
   accuracy: number;
+  macro_f1: number;
+  log_loss: number;
+  future_target: { events: number; macro_f1: number; critical_recall: number };
+  baseline: { macro_f1: number; critical_recall: number };
   class_balance: Record<string, number>;
 }
 
@@ -37,8 +41,7 @@ export default function EvaluationPage() {
   if (error) {
     return (
       <main className="flex-1 bg-[#061426] p-6 text-xs text-[#A8B6CB]">
-        No evaluation found. Build the train dataset with <code>scripts/build-encounters.ts</code> to create{' '}
-        <code>public/data/train/model_eval.json</code>.
+        No evaluation found at <code>public/data/train/model_eval.json</code>.
       </main>
     );
   }
@@ -54,14 +57,8 @@ export default function EvaluationPage() {
         <div>
           <h1 className="text-sm font-bold text-[#F5F7FA]">MODEL EVALUATION</h1>
           <p className="text-[11px] text-[#A8B6CB] max-w-3xl">{ev.task}</p>
+          <p className="text-[11px] text-[#A8B6CB] max-w-3xl mt-1">{ev.note}</p>
         </div>
-        {ev.placeholder && (
-          <div className="px-3 py-2 bg-[#FBBF24]/10 border border-[#FBBF24]/50 rounded text-[#FBBF24] max-w-md">
-            <strong>PLACEHOLDER RESULTS.</strong> These come from a simulated predictor, not a trained model. Replace{' '}
-            <code>public/data/train/model_eval.json</code> and the <code>model_tier</code> field of each encounter with your
-            model&apos;s output.
-          </div>
-        )}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -79,13 +76,19 @@ export default function EvaluationPage() {
         <div className="p-3 bg-[#0B1E35] border border-[#EF4444]/50 rounded-lg">
           <span className="text-[10px] text-[#EF4444] block font-bold">CRITICAL RECALL</span>
           <span className="text-xl font-bold text-[#EF4444]">{critical ? pct(critical.recall) : 'N/A'}</span>
-          <span className="text-[10px] text-[#A8B6CB] block">the number that matters most</span>
+          <span className="text-[10px] text-[#A8B6CB] block">{critical ? `${ev.confusion[ev.classes.indexOf('critical')]?.[ev.classes.indexOf('critical')]} of ${critical.support} critical events detected` : 'Critical metrics unavailable'}</span>
         </div>
         <div className="p-3 bg-[#0B1E35] border border-[#243B55] rounded-lg">
           <span className="text-[10px] text-[#A8B6CB] block">ACCURACY</span>
           <span className="text-sm font-bold text-[#F5F7FA]">{pct(ev.accuracy)}</span>
           <span className="text-[10px] text-[#A8B6CB] block">misleading on its own: classes are imbalanced</span>
         </div>
+      </div>
+
+      <div className="bg-[#0B1E35] border border-[#243B55] rounded-lg p-5 space-y-2 text-[#A8B6CB]">
+        <h2 className="text-xs font-bold text-[#F5F7FA]">INTERNAL HOLDOUT CONTEXT</h2>
+        <p>Macro F1: <strong className="text-[#F5F7FA]">{pct(ev.macro_f1)}</strong> · Log loss: <strong className="text-[#F5F7FA]">{ev.log_loss.toFixed(3)}</strong>. The latest-message rule baseline reached {pct(ev.baseline.macro_f1)} macro F1 and {pct(ev.baseline.critical_recall)} critical recall.</p>
+        <p>For {ev.future_target.events.toLocaleString()} events whose target occurred after the available messages, macro F1 was {pct(ev.future_target.macro_f1)} and critical recall was {pct(ev.future_target.critical_recall)}. The remaining {(ev.split.held_out_events - ev.future_target.events).toLocaleString()} events already contained the target message among their inputs.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">

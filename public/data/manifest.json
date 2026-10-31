@@ -9,18 +9,13 @@
       "kind": "train",
       "has_outcomes": true,
       "data_path": "/data/train",
-      "predicted_counts": {
-        "critical": 840,
-        "elevated": 2407,
-        "safe": 9907,
-        "incomplete": 0
-      },
       "tier_counts": {
         "critical": 908,
         "elevated": 2403,
         "safe": 9843,
         "incomplete": 0
-      }
+      },
+      "sha256_checksum": "ba47ce80580d5d6ff523ddc1d724901dbdfb3a5afdc5e755f0ca2bcefe6e4eb6"
     },
     {
       "id": "ds-test",
@@ -32,17 +27,18 @@
       "has_outcomes": false,
       "data_path": "/data/test",
       "predicted_counts": {
-        "critical": 218,
-        "elevated": 461,
-        "safe": 1488,
+        "safe": 1487,
+        "elevated": 492,
+        "critical": 188,
         "incomplete": 0
       },
       "tier_counts": {
-        "critical": 218,
-        "elevated": 461,
-        "safe": 1488,
+        "safe": 1487,
+        "elevated": 492,
+        "critical": 188,
         "incomplete": 0
-      }
+      },
+      "sha256_checksum": "fc4110e979e7d569cb8aa819d450d29311e799115b2fe5b519b8a18eafa37323"
     }
   ]
 }
