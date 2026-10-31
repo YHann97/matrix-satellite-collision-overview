@@ -5,7 +5,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useData } from '@/context/DataContext';
 import { TrajectoryCharts } from '@/components/encounters/TrajectoryCharts';
-import { formatRiskScore, normalizeLogRiskToPc, riskPowerLabel } from '@/lib/classification/policy';
+import { formatRiskScore as baseFormatRiskScore, normalizeLogRiskToPc } from '@/lib/classification/policy';
+
+// risk = -30 is the dataset's placeholder for "too small to compute" (score ~ 0).
+// Show it as "≈ 0" on this screen.
+const isPlaceholderScore = (score: number | null | undefined) =>
+  typeof score === 'number' && score <= 1e-29;
+const formatRiskScore = (score: number | null | undefined, digits = 2) =>
+  isPlaceholderScore(score) ? '≈ 0' : baseFormatRiskScore(score, digits);
 import { OperationalTier, ReviewStatus } from '@/types/telemetry';
 
 function EncountersContent() {
@@ -228,7 +235,7 @@ function EncountersContent() {
                   <th className="p-3 font-bold">OBJECT</th>
                   <th className="p-3 font-bold">{tiersArePredicted ? 'PREDICTED TIER' : 'RISK TIER'}</th>
                   {!tiersArePredicted && <th className="p-3 font-bold" title="Final-tier forecast when available">MODEL</th>}
-                  <th className="p-3 font-bold" title="Pc = 10^risk">RISK</th>
+                  <th className="p-3 font-bold" title="Risk score (log10)">RISK</th>
                   <th className="p-3 font-bold">MISS DIST</th>
                   <th className="p-3 font-bold">LEAD TIME</th>
                   <th className="p-3 font-bold">STATUS</th>
@@ -288,7 +295,7 @@ function EncountersContent() {
                         </td>
                       )}
                       <td className="p-3 font-bold text-[#F5F7FA]" title={`Pc = ${formatRiskScore(displayPc)}`}>
-                        {displayPc === 0 ? '0' : displayPc !== null && displayPc > 0 ? Math.log10(displayPc).toFixed(2) : 'N/A'}
+                        {isPlaceholderScore(displayPc) ? '≈ 0' : displayPc !== null && displayPc > 0 ? Math.log10(displayPc).toFixed(2) : 'N/A'}
                         {enc.predicted_pc !== null && (
                           <span className="text-[10px] text-[#245BFF] ml-1">AI</span>
                         )}
@@ -487,10 +494,6 @@ function EncountersContent() {
                         <span className="text-[#A8B6CB] block">Prediction Target:</span>
                         <span className="text-[#F5F7FA] font-bold">{selectedEncounter.model_tier_probabilities ? 'Final recorded tier' : 'Current assessment'}</span>
                       </div>
-                      <div>
-                        <span className="text-[#A8B6CB] block">Risk Score:</span>
-                        <span className="text-[#F5F7FA] font-mono">10^risk</span>
-                      </div>
                     </div>
                   </div>
 
@@ -537,12 +540,9 @@ function EncountersContent() {
                   {/* Metrics */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
-                      <span className="text-[#A8B6CB] text-[11px]">Risk Score (10^risk)</span>
+                      <span className="text-[#A8B6CB] text-[11px]">Risk Score</span>
                       <div className="text-sm font-bold text-[#F5F7FA] mt-1">
                         {formatRiskScore(selectedEncounter.source_pc)}
-                      </div>
-                      <div className="text-[10px] text-[#A8B6CB] font-mono">
-                        {riskPowerLabel(selectedEncounter.source_pc)}
                       </div>
                     </div>
                     <div className="p-3 bg-[#061426] border border-[#243B55] rounded">
@@ -738,13 +738,7 @@ function EncountersContent() {
                           <div className="grid grid-cols-2 gap-2 mt-2 text-[#A8B6CB] text-[11px]">
                             <div>
                               Risk score:{' '}
-                              <strong className="text-[#F5F7FA] font-mono">{formatRiskScore(msgPc)}</strong>
-                              {msgPc !== null && msgPc > 0 && msg.risk !== null && msg.risk !== undefined && (
-                                <span className="block text-[10px] text-[#A8B6CB]">
-                                  (10^{Number(msg.risk).toFixed(2)})
-                                </span>
-                              )}
-                            </div>
+                              <strong className="text-[#F5F7FA] font-mono">{formatRiskScore(msgPc)}</strong>                            </div>
                             <div>
                               Miss Distance:{' '}
                               <strong className="text-[#F5F7FA]">
