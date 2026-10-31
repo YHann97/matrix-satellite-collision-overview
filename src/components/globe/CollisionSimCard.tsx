@@ -20,7 +20,14 @@ const TIER_COLOR: Record<string, number> = {
   safe: 0x10b981,
 };
 
-const TARGET_PASS_SECONDS = 2;
+const TARGET_PASS_SECONDS = 4;
+
+const MIN_CARD_W = 300;
+const MIN_CARD_H = 140; // visualisation (canvas) height
+const DEFAULT_CARD_SIZE = { w: 340, h: 220 };
+
+// Last size the card was resized to (kept while the page is open)
+let lastCardSize: { w: number; h: number } = DEFAULT_CARD_SIZE;
 
 // Last position the card was dragged to (kept while the page is open, so re-opening it stays put)
 let lastCardPos: { x: number; y: number } | null = null;
@@ -56,6 +63,8 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(lastCardPos);
+  const resizeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [size, setSize] = useState(lastCardSize);
   const progressRef = useRef(0);
   const playingRef = useRef(true);
   const rateRef = useRef(1);
@@ -305,8 +314,8 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
   return (
     <div
       ref={cardRef}
-      className="absolute z-30 w-[340px] max-w-[90vw] bg-[#0B1E35] border border-[#243B55] rounded-xl shadow-2xl text-xs overflow-hidden"
-      style={{ left: pos?.x ?? 8, top: pos?.y ?? 48 }}
+      className="absolute z-30 max-w-[95%] bg-[#0B1E35] border border-[#243B55] rounded-xl shadow-2xl text-xs overflow-hidden"
+      style={{ left: pos?.x ?? 8, top: pos?.y ?? 48, width: size.w }}
     >
       <div
         className="flex items-center justify-between px-3 py-2 border-b border-[#243B55] cursor-move select-none touch-none"
@@ -362,7 +371,40 @@ export function CollisionSimCard({ encounter, message, onClose }: CollisionSimCa
       {!minimized && (
         <>
           <div className="relative">
-            <div ref={mountRef} className="w-full h-[220px] cursor-grab active:cursor-grabbing" />
+            <div
+              ref={mountRef}
+              className="w-full cursor-grab active:cursor-grabbing"
+              style={{ height: size.h }}
+            />
+            <div
+              className="absolute bottom-0 right-0 z-10 w-5 h-5 cursor-nwse-resize touch-none flex items-end justify-end p-0.5 text-[#A8B6CB] hover:text-[#F5F7FA]"
+              title="Drag to resize"
+              onPointerDown={(e) => {
+                resizeRef.current = { x: e.clientX, y: e.clientY, w: size.w, h: size.h };
+                e.currentTarget.setPointerCapture(e.pointerId);
+                e.stopPropagation();
+              }}
+              onPointerMove={(e) => {
+                const r = resizeRef.current;
+                const card = cardRef.current;
+                const parent = card?.offsetParent as HTMLElement | null;
+                if (!r || !card || !parent) return;
+                // Grow/shrink from the top-left corner, but never past the globe area
+                const maxW = Math.max(MIN_CARD_W, parent.clientWidth - card.offsetLeft - 4);
+                const w = Math.max(MIN_CARD_W, Math.min(maxW, r.w + e.clientX - r.x));
+                const h = Math.max(MIN_CARD_H, Math.min(900, r.h + e.clientY - r.y));
+                setSize({ w, h });
+              }}
+              onPointerUp={(e) => {
+                resizeRef.current = null;
+                if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+                lastCardSize = size;
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M9 1L1 9M9 5L5 9" />
+              </svg>
+            </div>
             <span ref={clockRef} className="absolute top-2 left-2 font-mono text-[11px] text-[#F5F7FA] pointer-events-none" />
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
               <div
